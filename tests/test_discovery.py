@@ -77,3 +77,23 @@ def test_unknown_diagnostics_and_fst_sorting(tmp_path: Path):
     unknown = result.fsts[1].diagnostics
     assert [diag.name for diag in unknown] == ["alpha_misc", "zzz_special"]
     assert all(diag.is_known is False for diag in unknown)
+
+
+
+def test_pls_is_known_and_nested_runs_are_discovered(tmp_path: Path):
+    fst_dir = tmp_path / "FST1388"
+    fst_dir.mkdir()
+    _touch(fst_dir / "FST_1388.lvm")
+
+    _touch(fst_dir / "pls" / "run_S0001" / "run_S0001.cihx")
+    _touch(fst_dir / "shift" / "shift_S0001" / "shift_S0001.cihx")
+
+    result = discover_campaign(tmp_path)
+    fst = result.fsts[0]
+
+    diagnostics = {diag.name: diag for diag in fst.diagnostics}
+    assert diagnostics["pls"].is_known is True
+    assert diagnostics["shift"].is_known is False
+
+    assert [run.name for run in diagnostics["pls"].runs] == ["run_S0001"]
+    assert [run.name for run in diagnostics["shift"].runs] == ["shift_S0001"]
