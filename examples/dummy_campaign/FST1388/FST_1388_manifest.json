@@ -1,0 +1,59 @@
+{
+  "fst_id": "FST_1388",
+  "lvm_path": "examples/dummy_campaign/FST1388/FST_1388.lvm",
+  "lvm_fixture_path": null,
+  "diagnostics": [
+    {
+      "name": "pls",
+      "is_known": true,
+      "run_count": 2
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "run_S0001",
+      "diagnostic": "pls",
+      "cihx_path": "examples/dummy_campaign/FST1388/pls/run_S0001/run_S0001.cihx",
+      "inferred_rate_hz": null,
+      "notes": [
+        "Unable to infer frame rate from .cihx metadata."
+      ],
+      "errors": []
+    },
+    {
+      "run_id": "scale_S0001",
+      "diagnostic": "pls",
+      "cihx_path": "examples/dummy_campaign/FST1388/pls/scale_S0001/scale_S0001.cihx",
+      "inferred_rate_hz": null,
+      "notes": [
+        "Unable to infer frame rate from .cihx metadata."
+      ],
+      "errors": []
+    }
+  ],
+  "condition_summary": {
+    "p0": null,
+    "T0": null,
+    "Re_1": null,
+    "p0j": null,
+    "p0j/p0": null,
+    "p0j/pinf": null,
+    "J": null
+  },
+  "units": {
+    "condition_summary": {
+      "p0": "Pa",
+      "T0": "K",
+      "Re_1": "1/m",
+      "p0j": "Pa",
+      "p0j/p0": "1",
+      "p0j/pinf": "1",
+      "J": "1"
+    },
+    "runs": {
+      "inferred_rate_hz": "Hz",
+      "run_id": null,
+      "cihx_path": null
+    }
+  }
+}

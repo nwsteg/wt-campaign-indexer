@@ -2,7 +2,11 @@ import json
 from pathlib import Path
 
 from wtt_campaign_indexer.discovery import discover_campaign
-from wtt_campaign_indexer.manifest import write_fst_manifest
+from wtt_campaign_indexer.manifest import (
+    build_campaign_summary_markdown,
+    write_campaign_summary,
+    write_fst_manifest,
+)
 
 
 def _touch(path: Path, content: str = "") -> None:
@@ -112,7 +116,10 @@ def test_manifest_deterministic_ordering_and_formatting(tmp_path: Path):
 }
 """
     expected = expected.replace("__LVM_PATH__", str(fst_dir / "FST_1392.lvm"))
-    expected = expected.replace("__CIHX_PATH__", str(fst_dir / "tracking" / "run_001" / "meta.cihx"))
+    expected = expected.replace(
+        "__CIHX_PATH__",
+        str(fst_dir / "tracking" / "run_001" / "meta.cihx"),
+    )
 
     assert manifest_path.read_text(encoding="utf-8") == expected
 
@@ -130,3 +137,29 @@ def test_manifest_handles_absent_diagnostics_gracefully(tmp_path: Path):
     assert payload["diagnostics"] == []
     assert payload["runs"] == []
     assert payload["condition_summary"]["p0"] is None
+
+def test_campaign_summary_contains_discovery_overview(tmp_path: Path):
+    fst_dir = tmp_path / "FST1388"
+    fst_dir.mkdir()
+    _touch(fst_dir / "FST_1388.lvm")
+    _touch(fst_dir / "pls" / "run_S0001" / "meta.cihx", "AcquisitionFrameRate = 10000")
+
+    summary = build_campaign_summary_markdown(tmp_path)
+
+    assert "# Dummy campaign summary" in summary
+    assert "| FST_1388 | FST_1388.lvm | 1 | 1 |" in summary
+    assert "| pls | yes | 1 |" in summary
+    assert "| pls | run_S0001 | 10000.000 |" in summary
+
+
+def test_write_campaign_summary_writes_file(tmp_path: Path):
+    fst_dir = tmp_path / "FST1391"
+    fst_dir.mkdir()
+    _touch(fst_dir / "FST_1391.lvm")
+
+    output_path = tmp_path / "campaign_summary.md"
+    result_path = write_campaign_summary(tmp_path, output_path)
+
+    assert result_path == output_path
+    assert output_path.exists()
+    assert "FST_1391" in output_path.read_text(encoding="utf-8")
