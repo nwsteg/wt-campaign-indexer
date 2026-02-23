@@ -197,7 +197,8 @@ def test_infer_rate_from_hcc_supports_telops_header_fallback(tmp_path: Path):
     hcc = tmp_path / "meta.hcc"
     header = bytearray(80)
     header[:4] = b"TC\x02\r"
+    header[44:48] = (3_000_000).to_bytes(4, "little")
     header[76:80] = (1500).to_bytes(4, "little")
     hcc.write_bytes(bytes(header) + b"\x00" * 16)
 
-    assert infer_rate_from_hcc(hcc) == 1500.0
+    assert infer_rate_from_hcc(hcc) == 3000.0

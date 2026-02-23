@@ -200,8 +200,10 @@ def infer_rate_from_hcc(hcc_path: Path) -> float | None:
 def _infer_rate_from_telops_header(hcc_path: Path) -> float | None:
     """Fallback for Telops HCC files when optional reader deps are unavailable.
 
-    The dummy campaign HCC fixtures use a `TC\x02\r` header where offset 76 stores
-    acquisition frequency as a little-endian unsigned integer.
+    The dummy campaign Telops fixtures store acquisition frequency in milli-Hz at
+    offset 44. Some files also include an integer at offset 76, but in practice
+    that value may represent another field, so the milli-Hz header value is
+    preferred when available.
     """
     try:
         with hcc_path.open("rb") as handle:
@@ -212,10 +214,16 @@ def _infer_rate_from_telops_header(hcc_path: Path) -> float | None:
     if len(header) < 80 or not header.startswith(b"TC\x02\r"):
         return None
 
-    rate = _to_positive_float(struct.unpack_from("<I", header, 76)[0])
-    if rate is None or rate > 1_000_000:
+    milli_hz_rate = _to_positive_float(struct.unpack_from("<I", header, 44)[0])
+    if milli_hz_rate is not None:
+        rate_hz = milli_hz_rate / 1000.0
+        if 0 < rate_hz <= 1_000_000:
+            return rate_hz
+
+    fallback_rate = _to_positive_float(struct.unpack_from("<I", header, 76)[0])
+    if fallback_rate is None or fallback_rate > 1_000_000:
         return None
-    return rate
+    return fallback_rate
 
 
 def _looks_like_support_run(run_id: str) -> bool:
