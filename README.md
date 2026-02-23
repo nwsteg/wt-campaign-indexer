@@ -123,15 +123,12 @@ wtt-plot-lvm-fixture \
 Point the tool at a campaign root (including `examples/dummy_campaign`) to generate one manifest per FST plus a markdown health-check summary.
 
 ```bash
-wtt-write-campaign-summary \
-  --campaign-root examples/dummy_campaign \
-  --summary-output examples/dummy_campaign/campaign_summary.md \
-  --tunnel-mach 7.2 \
-  --jet-used \
-  --jet-mach 3.09
+wtt-write-campaign-summary examples/dummy_campaign
 ```
 
 The CLI prints per-folder progress (for example, `Processing FST_1391...`) while manifests/summary are being built.
+
+If `--tunnel-mach` is omitted and you run in an interactive terminal, the CLI prompts for tunnel Mach (default 7.2).
 
 If `--jet-used`/`--no-jet-used` is omitted and you run in an interactive terminal, the CLI will prompt whether a jet was used and (if yes) ask for jet Mach.
 

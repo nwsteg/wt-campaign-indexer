@@ -22,6 +22,19 @@ def _prompt_bool(prompt: str, default: bool) -> bool:
     return raw in {"y", "yes", "true", "1"}
 
 
+def _resolve_tunnel_mach(tunnel_mach: float | None) -> float:
+    if tunnel_mach is not None:
+        return tunnel_mach
+
+    if not sys.stdin.isatty():
+        return 7.2
+
+    raw = input("Enter tunnel Mach number for this campaign summary [7.2]: ").strip()
+    if not raw:
+        return 7.2
+    return float(raw)
+
+
 def _resolve_jet_options(
     *,
     jet_used: bool | None,
@@ -51,7 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Write campaign manifest files and a campaign summary markdown report"
     )
-    parser.add_argument("--campaign-root", type=Path, required=True)
+    parser.add_argument(
+        "campaign_root",
+        type=Path,
+        nargs="?",
+        default=Path("."),
+        help="Campaign root folder (defaults to current directory)",
+    )
     parser.add_argument(
         "--summary-output",
         type=Path,
@@ -61,8 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tunnel-mach",
         type=float,
-        default=7.2,
-        help="Tunnel Mach number used for isentropic pinf calculations",
+        default=None,
+        help="Tunnel Mach number used for isentropic pinf calculations (prompts in TTY if omitted)",
     )
     parser.add_argument(
         "--jet-used",
@@ -87,12 +106,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    tunnel_mach = _resolve_tunnel_mach(args.tunnel_mach)
     jet_used, jet_mach = _resolve_jet_options(jet_used=args.jet_used, jet_mach=args.jet_mach)
 
     print("Starting campaign manifest generation...", flush=True)
     manifest_paths = write_campaign_manifests(
         args.campaign_root,
-        tunnel_mach=args.tunnel_mach,
+        tunnel_mach=tunnel_mach,
         jet_used=jet_used,
         jet_mach=jet_mach,
         progress_callback=_print_progress,
@@ -101,14 +121,14 @@ def main() -> None:
     summary_path = write_campaign_summary(
         args.campaign_root,
         args.summary_output,
-        tunnel_mach=args.tunnel_mach,
+        tunnel_mach=tunnel_mach,
         jet_used=jet_used,
         jet_mach=jet_mach,
         progress_callback=_print_progress,
     )
     print(f"Wrote {len(manifest_paths)} manifest files")
     print(f"Wrote summary to {summary_path}")
-    print(f"Tunnel Mach={args.tunnel_mach}; jet_used={jet_used}; jet_mach={jet_mach}")
+    print(f"Tunnel Mach={tunnel_mach}; jet_used={jet_used}; jet_mach={jet_mach}")
 
 
 if __name__ == "__main__":
