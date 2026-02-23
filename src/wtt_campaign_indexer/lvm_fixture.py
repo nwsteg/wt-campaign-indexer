@@ -19,6 +19,13 @@ class DetectionResult:
     trigger_candidates: list[int]
 
 
+@dataclass(frozen=True)
+class FailedBurstResult:
+    drop_idx: int
+    trigger_candidates: list[int]
+    trigger_within_window: list[int]
+
+
 def read_lvm_data(
     file_path: Path,
     header_row_index: int = 23,
@@ -131,6 +138,63 @@ def pick_trigger_and_burst(
 
     return DetectionResult(
         trigger_idx=int(chosen), burst_idx=burst_idx, trigger_candidates=candidates
+    )
+
+
+def pick_failed_burst_drop(
+    df: pd.DataFrame,
+    trigger_channel: str = "Voltage",
+    burst_channel: str = "PLEN-PT",
+    rolling_trigger: int = 6,
+    rolling_burst: int = 100,
+    top_k: int = 20,
+    trigger_guard_ms: float = 50.0,
+    fs_hz: float | None = None,
+) -> FailedBurstResult:
+    """Detect a likely failed-burst event anchored on plenum-pressure decrease.
+
+    A failed burst is defined as a significant plenum drop with no trigger candidate
+    within ±trigger_guard_ms of the drop index.
+    """
+    if burst_channel not in df.columns:
+        raise ValueError(
+            f"Burst/plenum channel '{burst_channel}' not found in columns: {list(df.columns)}"
+        )
+    if trigger_channel not in df.columns:
+        raise ValueError(
+            f"Trigger channel '{trigger_channel}' not found in columns: {list(df.columns)}"
+        )
+
+    plenum_grad = _rolling_gradient(df[burst_channel], rolling_burst)
+    drop_idx = int(np.argmin(plenum_grad))
+
+    pre_drop_grad = plenum_grad[:drop_idx] if drop_idx > 0 else np.array([], dtype=float)
+    if pre_drop_grad.size == 0 or float(np.max(pre_drop_grad)) <= 0:
+        raise ValueError(
+            "Could not confirm a plenum rise before the drop; failed-burst signature not found."
+        )
+
+    trigger_grad = _rolling_gradient(df[trigger_channel], rolling_trigger)
+    trigger_candidates = _top_peaks(
+        trigger_grad,
+        k=top_k,
+        min_distance=max(rolling_trigger, 1),
+        positive_only=True,
+    )
+
+    inferred_fs = infer_sample_rate_hz(df) if fs_hz is None else fs_hz
+    guard_samples = int(round(trigger_guard_ms * inferred_fs / 1000.0))
+    near_drop = [idx for idx in trigger_candidates if abs(idx - drop_idx) <= guard_samples]
+    if near_drop:
+        raise ValueError(
+            "Found trigger candidate(s) within guard window of plenum drop "
+            f"(±{trigger_guard_ms:.1f} ms): {near_drop}"
+        )
+
+    return FailedBurstResult(
+        drop_idx=drop_idx,
+        trigger_candidates=trigger_candidates,
+        trigger_within_window=near_drop,
     )
 
 
@@ -294,6 +358,8 @@ def create_lvm_fixture(
     metadata_json_path: Path | None = None,
     plot_output_path: Path | None = None,
     plot_plenum_channel: str = "PLEN-PT",
+    window_anchor: str = "trigger",
+    failed_burst_trigger_guard_ms: float = 50.0,
 ) -> dict:
     if decimate < 1:
         raise ValueError("--decimate must be >= 1")
@@ -335,13 +401,31 @@ def create_lvm_fixture(
                 header_row_index = auto_idx
                 lines = read_prefix_lines(input_path, stop_row=header_row_index)
 
-    detection = pick_trigger_and_burst(
-        df,
-        trigger_channel=trigger_channel,
-        burst_channel=burst_channel,
-        rolling_trigger=rolling_trigger,
-        rolling_burst=rolling_burst,
-    )
+    if window_anchor not in {"trigger", "failed-burst-drop"}:
+        raise ValueError("--window-anchor must be 'trigger' or 'failed-burst-drop'")
+
+    detection: DetectionResult | None = None
+    failed_burst_detection: FailedBurstResult | None = None
+    if window_anchor == "trigger":
+        detection = pick_trigger_and_burst(
+            df,
+            trigger_channel=trigger_channel,
+            burst_channel=burst_channel,
+            rolling_trigger=rolling_trigger,
+            rolling_burst=rolling_burst,
+        )
+    else:
+        if not burst_channel:
+            raise ValueError("--burst-channel is required when --window-anchor=failed-burst-drop")
+        failed_burst_detection = pick_failed_burst_drop(
+            df,
+            trigger_channel=trigger_channel,
+            burst_channel=burst_channel,
+            rolling_trigger=rolling_trigger,
+            rolling_burst=rolling_burst,
+            trigger_guard_ms=failed_burst_trigger_guard_ms,
+            fs_hz=fs_hz,
+        )
 
     inferred_fs_hz = infer_sample_rate_hz(df) * read_every_n
     fs_hz = fs_hz if fs_hz is not None else inferred_fs_hz
@@ -350,12 +434,20 @@ def create_lvm_fixture(
     pre_samples = int(round(pre_ms * effective_fs_hz / 1000.0))
     post_samples = int(round(post_ms * effective_fs_hz / 1000.0))
 
-    start = max(0, detection.trigger_idx - pre_samples)
-    end_exclusive = min(len(df), detection.trigger_idx + post_samples + 1)
+    anchor_idx = (
+        failed_burst_detection.drop_idx
+        if failed_burst_detection is not None
+        else detection.trigger_idx
+    )
 
-    must_keep = {detection.trigger_idx}
-    if detection.burst_idx is not None:
-        must_keep.add(detection.burst_idx)
+    start = max(0, anchor_idx - pre_samples)
+    end_exclusive = min(len(df), anchor_idx + post_samples + 1)
+
+    must_keep = {anchor_idx}
+    if detection is not None:
+        must_keep.add(detection.trigger_idx)
+        if detection.burst_idx is not None:
+            must_keep.add(detection.burst_idx)
     indices = _select_indices(start, end_exclusive, decimate=decimate, must_keep=must_keep)
 
     fixture_df = df.iloc[indices].copy()
@@ -366,9 +458,16 @@ def create_lvm_fixture(
             file_obj.write(line if line.endswith("\n") else f"{line}\n")
         fixture_df.to_csv(file_obj, sep="\t", index=False, header=False, lineterminator="\n")
 
-    trigger_fixture_idx = indices.index(detection.trigger_idx)
+    anchor_fixture_idx = indices.index(anchor_idx)
+    trigger_fixture_idx = indices.index(detection.trigger_idx) if detection is not None else None
     burst_fixture_idx = (
-        indices.index(detection.burst_idx) if detection.burst_idx in indices else None
+        indices.index(detection.burst_idx)
+        if (
+            detection is not None
+            and detection.burst_idx is not None
+            and detection.burst_idx in indices
+        )
+        else None
     )
 
     metadata = {
@@ -377,15 +476,29 @@ def create_lvm_fixture(
         "fs_hz": float(fs_hz),
         "effective_fs_hz": float(effective_fs_hz),
         "read_every_n": int(read_every_n),
-        "trigger_index_in_fixture": int(trigger_fixture_idx),
+        "trigger_index_in_fixture": (
+            int(trigger_fixture_idx) if trigger_fixture_idx is not None else None
+        ),
         "burst_index_in_fixture": int(burst_fixture_idx) if burst_fixture_idx is not None else None,
+        "window_anchor": window_anchor,
+        "window_anchor_input_index": int(anchor_idx),
+        "window_anchor_index_in_fixture": int(anchor_fixture_idx),
+        "failed_burst_trigger_guard_ms": float(failed_burst_trigger_guard_ms),
+        "failed_burst_drop_input_index": (
+            int(failed_burst_detection.drop_idx) if failed_burst_detection is not None else None
+        ),
         "pre_ms": float(pre_ms),
         "post_ms": float(post_ms),
         "decimation": int(decimate),
         "trigger_channel": trigger_channel,
         "burst_channel": burst_channel,
         "plot_plenum_channel": plot_plenum_channel,
-        "trigger_candidates_input_indices": detection.trigger_candidates,
+        "trigger_candidates_input_indices": (
+            detection.trigger_candidates if detection is not None else []
+        ),
+        "failed_burst_trigger_candidates_input_indices": (
+            failed_burst_detection.trigger_candidates if failed_burst_detection is not None else []
+        ),
     }
 
     if metadata_json_path:
@@ -397,7 +510,7 @@ def create_lvm_fixture(
             fixture_df=fixture_df,
             trigger_channel=trigger_channel,
             plen_channel=plot_plenum_channel,
-            trigger_idx_in_fixture=trigger_fixture_idx,
+            trigger_idx_in_fixture=anchor_fixture_idx,
             fs_hz=effective_fs_hz,
             plot_path=plot_output_path,
         )

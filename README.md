@@ -56,6 +56,21 @@ wtt-make-lvm-fixture \
   --write-metadata-json examples/dummy_campaign/FST1391/FST_1391_fixture.json
 ```
 
+Failed-burst fixture example (anchor around plenum decrease and require no nearby trigger):
+
+```bash
+wtt-make-lvm-fixture \
+  --input /path/to/FST_9999.lvm \
+  --output /path/to/FST_9999_failed_burst_fixture.lvm \
+  --trigger-channel Voltage \
+  --burst-channel PLEN-PT \
+  --window-anchor failed-burst-drop \
+  --failed-burst-trigger-guard-ms 50 \
+  --decimate 1 \
+  --pre-ms 5000 \
+  --post-ms 5000
+```
+
 ### Reader and detection behavior
 
 - Reads LVM data using the same style as your campaign scripts (`header=None`, selected rows via `skiprows`, header loaded separately).
@@ -65,6 +80,8 @@ wtt-make-lvm-fixture \
 - Detects trigger candidates from `trigger-channel` using rolling-mean + gradient peaks.
 - Detects burst index from `burst-channel` using rolling-mean + gradient argmax.
 - If several trigger candidates are strong, chooses the one nearest burst.
+- Supports failed-burst snippets via `--window-anchor failed-burst-drop`, which anchors around the plenum-pressure decrease and rejects windows that have trigger candidates within a configurable guard window (`--failed-burst-trigger-guard-ms`, default 50 ms).
+- For failed-burst snippets, prefer `--decimate 1` to avoid missing short trigger-like gradients.
 
 
 
