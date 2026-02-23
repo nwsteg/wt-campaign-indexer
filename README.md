@@ -56,15 +56,34 @@ wtt-make-lvm-fixture \
   --write-metadata-json examples/dummy_campaign/FST1391/FST_1391_fixture.json
 ```
 
+Failed-burst fixture example (anchor around plenum decrease with slow-rise/quick-fall check):
+
+```bash
+wtt-make-lvm-fixture \
+  --input /path/to/FST_9999.lvm \
+  --output /path/to/FST_9999_failed_burst_fixture.lvm \
+  --trigger-channel Voltage \
+  --burst-channel PLEN-PT \
+  --window-anchor failed-burst-drop \
+  --failed-burst-min-rise-to-drop-ms 500 \
+  --failed-burst-min-drop-to-rise-grad-ratio 0.5 \
+  --decimate 1 \
+  --pre-ms 5000 \
+  --post-ms 5000
+```
+
 ### Reader and detection behavior
 
 - Reads LVM data using the same style as your campaign scripts (`header=None`, selected rows via `skiprows`, header loaded separately).
 - Handles occasional variable-width rows (e.g., some data rows with 29 fields while header defines 28) by reading only the header-defined column count, which avoids noisy parser warnings.
 - Supports `--read-every-n` for faster coarse reads on very large files.
+- Reads only the header-defined (or requested) columns to reduce parse overhead on large/variable-width LVM rows.
 - Interpolates missing numeric values after loading.
 - Detects trigger candidates from `trigger-channel` using rolling-mean + gradient peaks.
 - Detects burst index from `burst-channel` using rolling-mean + gradient argmax.
 - If several trigger candidates are strong, chooses the one nearest burst.
+- Supports failed-burst snippets via `--window-anchor failed-burst-drop`, which anchors around the plenum-pressure decrease and checks for a slow rise followed by a quick fall using configurable thresholds (`--failed-burst-min-rise-to-drop-ms`, `--failed-burst-min-drop-to-rise-grad-ratio`).
+- For failed-burst snippets, prefer `--decimate 1` to avoid missing short trigger-like gradients.
 
 
 
@@ -112,7 +131,11 @@ wtt-write-campaign-summary \
   --jet-mach 3.09
 ```
 
+The CLI prints per-folder progress (for example, `Processing FST_1391...`) while manifests/summary are being built.
+
 If `--jet-used`/`--no-jet-used` is omitted and you run in an interactive terminal, the CLI will prompt whether a jet was used and (if yes) ask for jet Mach.
+
+To skip an FST folder from manifest/summary generation, add a `skip.txt` file in that FST folder root (for example: `FST1391/skip.txt`).
 
 ## Quality checks
 

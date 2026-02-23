@@ -27,6 +27,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--read-every-n", type=int, default=1)
     parser.add_argument("--rolling-trigger", type=int, default=6)
     parser.add_argument("--rolling-burst", type=int, default=100)
+    parser.add_argument(
+        "--window-anchor",
+        choices=["trigger", "failed-burst-drop"],
+        default="trigger",
+        help="Anchor window on detected trigger (default) or plenum drop for failed-burst snippets",
+    )
+    parser.add_argument(
+        "--failed-burst-min-rise-to-drop-ms",
+        type=float,
+        default=500.0,
+        help="For failed-burst mode, minimum time between rise and drop events (ms)",
+    )
+    parser.add_argument(
+        "--failed-burst-min-drop-to-rise-grad-ratio",
+        type=float,
+        default=0.5,
+        help="For failed-burst mode, minimum |drop_grad| / rise_grad ratio",
+    )
     parser.add_argument("--write-metadata-json", type=Path, default=None)
     parser.add_argument(
         "--plot-output",
@@ -57,6 +75,9 @@ def main() -> None:
         read_every_n=args.read_every_n,
         rolling_trigger=args.rolling_trigger,
         rolling_burst=args.rolling_burst,
+        window_anchor=args.window_anchor,
+        failed_burst_min_rise_to_drop_ms=args.failed_burst_min_rise_to_drop_ms,
+        failed_burst_min_drop_to_rise_grad_ratio=args.failed_burst_min_drop_to_rise_grad_ratio,
         metadata_json_path=args.write_metadata_json,
         plot_output_path=args.plot_output,
         plot_plenum_channel=args.plot_plenum_channel,

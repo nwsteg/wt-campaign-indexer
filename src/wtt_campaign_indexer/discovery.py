@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +56,8 @@ def discover_campaign(campaign_root: Path) -> CampaignDiscovery:
             continue
         normalized = normalize_fst_name(child.name)
         if normalized is None:
+            continue
+        if (child / "skip.txt").exists():
             continue
 
         fst_number = int(normalized.split("_")[1])
@@ -114,27 +117,33 @@ def _discover_diagnostics(fst_dir: Path) -> tuple[DiagnosticDiscovery, ...]:
 def _discover_runs(diagnostic_dir: Path) -> tuple[RunDiscovery, ...]:
     runs: list[RunDiscovery] = []
 
-    for child in sorted(entry for entry in diagnostic_dir.rglob("*") if entry.is_dir()):
-        cihx_files = tuple(
-            sorted(
-                candidate
-                for candidate in child.iterdir()
-                if candidate.is_file() and candidate.suffix.lower() == ".cihx"
-            )
-        )
-        hcc_files = tuple(
-            sorted(
-                candidate
-                for candidate in child.iterdir()
-                if candidate.is_file() and candidate.suffix.lower() == ".hcc"
-            )
-        )
+    # Run folders are expected to be immediate children of each diagnostic.
+    # Avoid recursive directory walks here to keep discovery fast on campaigns
+    # that contain very large image dumps in deeper folders.
+    for child in sorted(entry for entry in diagnostic_dir.iterdir() if entry.is_dir()):
+        cihx_files: list[Path] = []
+        hcc_files: list[Path] = []
+
+        with os.scandir(child) as entries:
+            for entry in entries:
+                if not entry.is_file():
+                    continue
+                lowered = entry.name.lower()
+                if lowered.endswith(".cihx"):
+                    cihx_files.append(Path(entry.path))
+                elif lowered.endswith(".hcc"):
+                    hcc_files.append(Path(entry.path))
+
         if not cihx_files and not hcc_files:
             continue
 
-        run_name = str(child.relative_to(diagnostic_dir))
         runs.append(
-            RunDiscovery(name=run_name, path=child, cihx_files=cihx_files, hcc_files=hcc_files)
+            RunDiscovery(
+                name=child.name,
+                path=child,
+                cihx_files=tuple(sorted(cihx_files)),
+                hcc_files=tuple(sorted(hcc_files)),
+            )
         )
 
     runs.sort(key=lambda run: run.name)
