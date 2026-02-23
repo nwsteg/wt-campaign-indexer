@@ -20,8 +20,10 @@
       "diagnostic": "piv",
       "cihx_path": "examples/dummy_campaign/FST1391/piv/cal_S0001/cal_S0001.cihx",
       "inferred_rate_hz": null,
+      "is_support_run": true,
       "notes": [
-        "Unable to infer frame rate from .cihx metadata."
+        "Unable to infer frame rate from .cihx metadata.",
+        "Support run (scale/cal); not treated as primary flow data."
       ],
       "errors": []
     },
@@ -30,6 +32,7 @@
       "diagnostic": "piv",
       "cihx_path": "examples/dummy_campaign/FST1391/piv/run_S0001/run_S0001.cihx",
       "inferred_rate_hz": null,
+      "is_support_run": false,
       "notes": [
         "Unable to infer frame rate from .cihx metadata."
       ],
@@ -40,8 +43,10 @@
       "diagnostic": "piv",
       "cihx_path": "examples/dummy_campaign/FST1391/piv/scale_S0001/scale_S0001.cihx",
       "inferred_rate_hz": null,
+      "is_support_run": true,
       "notes": [
-        "Unable to infer frame rate from .cihx metadata."
+        "Unable to infer frame rate from .cihx metadata.",
+        "Support run (scale/cal); not treated as primary flow data."
       ],
       "errors": []
     },
@@ -50,6 +55,7 @@
       "diagnostic": "shift",
       "cihx_path": "examples/dummy_campaign/FST1391/shift/shift_S0001/shift_S0001.cihx",
       "inferred_rate_hz": null,
+      "is_support_run": false,
       "notes": [
         "Unable to infer frame rate from .cihx metadata."
       ],
@@ -57,20 +63,25 @@
     }
   ],
   "condition_summary": {
-    "p0": null,
-    "T0": null,
-    "Re_1": null,
-    "p0j": null,
-    "p0j/p0": null,
-    "p0j/pinf": null,
-    "J": null
+    "p0": 418.6696529303482,
+    "T0": 295.5796878472505,
+    "Re_1": 642474506.6559926,
+    "p0j": 300.43434954726365,
+    "T0j": 296.1154591710794,
+    "p0j/p0": 0.7175928502208525,
+    "p0j/pinf": 20.43771085355535,
+    "J": 0.7169433742757705
   },
+  "condition_notes": [
+    "Steady-state window: 50-90 ms after burst (indices 738-938)."
+  ],
   "units": {
     "condition_summary": {
-      "p0": "Pa",
+      "p0": "psia",
       "T0": "K",
       "Re_1": "1/m",
-      "p0j": "Pa",
+      "p0j": "psia",
+      "T0j": "K",
       "p0j/p0": "1",
       "p0j/pinf": "1",
       "J": "1"
@@ -78,7 +89,8 @@
     "runs": {
       "inferred_rate_hz": "Hz",
       "run_id": null,
-      "cihx_path": null
+      "cihx_path": null,
+      "is_support_run": null
     }
   }
 }

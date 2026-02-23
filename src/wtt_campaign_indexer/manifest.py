@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections import OrderedDict
 from pathlib import Path
 
 from wtt_campaign_indexer.discovery import FSTDiscovery, discover_campaign
+from wtt_campaign_indexer.lvm_fixture import (
+    infer_sample_rate_hz,
+    pick_trigger_and_burst,
+    read_lvm_data,
+)
 
 _CONDITION_UNITS = {
-    "p0": "Pa",
+    "p0": "psia",
     "T0": "K",
     "Re_1": "1/m",
-    "p0j": "Pa",
+    "p0j": "psia",
+    "T0j": "K",
     "p0j/p0": "1",
     "p0j/pinf": "1",
     "J": "1",
@@ -21,6 +28,10 @@ _RATE_PATTERNS = (
     re.compile(r"AcquisitionFrameRate[^0-9]*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
     re.compile(r"<FrameRate[^>]*>([0-9]+(?:\.[0-9]+)?)</FrameRate>", re.IGNORECASE),
 )
+
+_STEADY_STATE_START_MS = 50.0
+_STEADY_STATE_END_MS = 90.0
+_PINF_PSIA = 14.7
 
 
 def infer_rate_from_cihx(cihx_path: Path) -> float | None:
@@ -33,6 +44,116 @@ def infer_rate_from_cihx(cihx_path: Path) -> float | None:
             except ValueError:
                 return None
     return None
+
+
+def _looks_like_support_run(run_id: str) -> bool:
+    lowered = run_id.lower()
+    return "scale" in lowered or "cal" in lowered
+
+
+def _safe_mean(df, channel: str) -> float | None:
+    if channel not in df.columns:
+        return None
+    value = float(df[channel].mean())
+    if math.isnan(value):
+        return None
+    return value
+
+
+def _select_channel(df, *candidates: str) -> float | None:
+    for candidate in candidates:
+        value = _safe_mean(df, candidate)
+        if value is not None:
+            return value
+    return None
+
+
+def _dynamic_viscosity_sutherland(temp_k: float) -> float:
+    mu_ref = 1.716e-5
+    t_ref = 273.15
+    c = 111.0
+    return mu_ref * (temp_k / t_ref) ** 1.5 * (t_ref + c) / (temp_k + c)
+
+
+def _compute_reynolds_per_meter(p0_psia: float, t0_k: float) -> float:
+    p0_pa = p0_psia * 6894.757293168
+    gamma = 1.4
+    gas_constant = 287.05
+    mu = _dynamic_viscosity_sutherland(t0_k)
+    return p0_pa * math.sqrt(gamma / (gas_constant * t0_k)) / mu
+
+
+def compute_steady_state_conditions(
+    lvm_path: Path,
+) -> tuple[OrderedDict[str, float | None], list[str]]:
+    notes: list[str] = []
+    try:
+        df = read_lvm_data(lvm_path, header_row_index=23)
+        detection = pick_trigger_and_burst(df, trigger_channel="Voltage", burst_channel="PLEN-PT")
+        if detection.burst_idx is None:
+            raise ValueError("Burst index could not be detected.")
+        fs_hz = infer_sample_rate_hz(df)
+    except Exception as exc:
+        notes.append(f"Unable to compute steady-state summary from LVM: {exc}")
+        return OrderedDict((key, None) for key in _CONDITION_UNITS), notes
+
+    start_idx = detection.burst_idx + int(round(_STEADY_STATE_START_MS * fs_hz / 1000.0))
+    end_idx = detection.burst_idx + int(round(_STEADY_STATE_END_MS * fs_hz / 1000.0))
+    start_idx = max(0, start_idx)
+    end_idx = min(len(df) - 1, end_idx)
+
+    if end_idx <= start_idx:
+        notes.append("Steady-state window was empty after burst detection.")
+        return OrderedDict((key, None) for key in _CONDITION_UNITS), notes
+
+    window = df.iloc[start_idx : end_idx + 1]
+
+    p0 = _select_channel(window, "PLEN-PT")
+    t0 = _select_channel(window, "TC 1", "TC 2", "TC 3")
+    p0j = _select_channel(window, "DT-PT 1", "BT-PT", "TRIG-PT")
+    t0j = _select_channel(window, "TC 2", "TC 1", "TC 3")
+
+    if p0 is None:
+        notes.append("Channel 'PLEN-PT' not found; p0 unavailable.")
+    if t0 is None:
+        notes.append("No TC channel found for T0.")
+    if p0j is None:
+        notes.append("No jet pressure channel found for p0j.")
+    if t0j is None:
+        notes.append("No TC channel found for T0j.")
+
+    p0j_over_p0 = (p0j / p0) if (p0 and p0j and p0 != 0) else None
+    p0j_over_pinf = (p0j / _PINF_PSIA) if p0j is not None else None
+
+    reynolds = None
+    if p0 is not None and t0 is not None and t0 > 0:
+        reynolds = _compute_reynolds_per_meter(p0_psia=p0, t0_k=t0)
+
+    j_value = None
+    if p0j_over_p0 is not None and t0 is not None and t0j is not None and t0j > 0:
+        j_value = p0j_over_p0 * math.sqrt(t0 / t0j)
+
+    notes.append(
+        "Steady-state window: "
+        f"{_STEADY_STATE_START_MS:.0f}-{_STEADY_STATE_END_MS:.0f} ms after burst "
+        f"(indices {start_idx}-{end_idx})."
+    )
+
+    return (
+        OrderedDict(
+            [
+                ("p0", p0),
+                ("T0", t0),
+                ("Re_1", reynolds),
+                ("p0j", p0j),
+                ("T0j", t0j),
+                ("p0j/p0", p0j_over_p0),
+                ("p0j/pinf", p0j_over_pinf),
+                ("J", j_value),
+            ]
+        ),
+        notes,
+    )
 
 
 def find_lvm_fixture_path(fst: FSTDiscovery) -> Path | None:
@@ -81,6 +202,8 @@ def build_fst_manifest(fst: FSTDiscovery) -> OrderedDict[str, object]:
                 inferred_rate = infer_rate_from_cihx(cihx_path)
                 if inferred_rate is None:
                     notes.append("Unable to infer frame rate from .cihx metadata.")
+            if _looks_like_support_run(run.name):
+                notes.append("Support run (scale/cal); not treated as primary flow data.")
 
             run_entries.append(
                 OrderedDict(
@@ -89,6 +212,7 @@ def build_fst_manifest(fst: FSTDiscovery) -> OrderedDict[str, object]:
                         ("diagnostic", diagnostic.name),
                         ("cihx_path", str(cihx_path) if cihx_path else None),
                         ("inferred_rate_hz", inferred_rate),
+                        ("is_support_run", _looks_like_support_run(run.name)),
                         ("notes", notes),
                         ("errors", errors),
                     ]
@@ -96,6 +220,10 @@ def build_fst_manifest(fst: FSTDiscovery) -> OrderedDict[str, object]:
             )
 
     fixture_path = find_lvm_fixture_path(fst)
+    condition_summary = OrderedDict((key, None) for key in _CONDITION_UNITS)
+    condition_notes: list[str] = []
+    if fst.primary_lvm:
+        condition_summary, condition_notes = compute_steady_state_conditions(fst.primary_lvm)
 
     manifest = OrderedDict(
         [
@@ -104,10 +232,8 @@ def build_fst_manifest(fst: FSTDiscovery) -> OrderedDict[str, object]:
             ("lvm_fixture_path", str(fixture_path) if fixture_path else None),
             ("diagnostics", diagnostics),
             ("runs", run_entries),
-            (
-                "condition_summary",
-                OrderedDict((key, None) for key in _CONDITION_UNITS),
-            ),
+            ("condition_summary", condition_summary),
+            ("condition_notes", condition_notes),
             (
                 "units",
                 OrderedDict(
@@ -123,6 +249,7 @@ def build_fst_manifest(fst: FSTDiscovery) -> OrderedDict[str, object]:
                                     ("inferred_rate_hz", "Hz"),
                                     ("run_id", None),
                                     ("cihx_path", None),
+                                    ("is_support_run", None),
                                 ]
                             ),
                         ),
@@ -146,12 +273,85 @@ def write_campaign_manifests(campaign_root: Path) -> tuple[Path, ...]:
     return tuple(write_fst_manifest(fst) for fst in discovery.fsts)
 
 
+def _format_rate_khz(rate_hz: float | None) -> str:
+    if rate_hz is None:
+        return ""
+    return f"{rate_hz / 1000.0:.3f}"
+
+
+def _format_numeric(value: float | None, digits: int = 3) -> str:
+    if value is None:
+        return ""
+    return f"{value:.{digits}f}"
+
+
+def _pick_primary_actual_run(
+    manifest: OrderedDict[str, object], diagnostic_name: str
+) -> dict | None:
+    for run in manifest["runs"]:
+        if run["diagnostic"] != diagnostic_name:
+            continue
+        if run["is_support_run"]:
+            continue
+        return run
+    return None
+
+
 def build_campaign_summary_markdown(campaign_root: Path) -> str:
     discovery = discover_campaign(campaign_root)
     lines: list[str] = []
     lines.append("# Dummy campaign summary")
     lines.append("")
     lines.append(f"Campaign root: `{Path(campaign_root)}`")
+    lines.append("")
+    lines.append("## Top-level overview (steady-state, 50-90 ms after burst)")
+    lines.append("")
+    lines.append(
+        "| FST | Diagnostic | Rate (kHz) | p0 (psia) | T0 (K) | Re_1 x 10^-6 (1/m) | "
+        "p0j (psia) | T0j (K) | p0j/p0 | p0j/pinf | J |"
+    )
+    lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+
+    for fst in discovery.fsts:
+        manifest = build_fst_manifest(fst)
+        summary = manifest["condition_summary"]
+
+        if manifest["diagnostics"]:
+            for diagnostic in manifest["diagnostics"]:
+                primary_run = _pick_primary_actual_run(manifest, diagnostic["name"])
+                rate_khz = _format_rate_khz(
+                    primary_run["inferred_rate_hz"] if primary_run is not None else None
+                )
+                reynolds_millions = (
+                    summary["Re_1"] / 1_000_000.0 if summary["Re_1"] is not None else None
+                )
+                row = [
+                    manifest["fst_id"],
+                    diagnostic["name"],
+                    rate_khz,
+                    _format_numeric(summary["p0"], 1),
+                    _format_numeric(summary["T0"], 1),
+                    _format_numeric(reynolds_millions, 2),
+                    _format_numeric(summary["p0j"], 1),
+                    _format_numeric(summary["T0j"], 1),
+                    _format_numeric(summary["p0j/p0"], 2),
+                    _format_numeric(summary["p0j/pinf"], 1),
+                    _format_numeric(summary["J"], 2),
+                ]
+                lines.append("| " + " | ".join(row) + " |")
+        else:
+            lines.append(f"| {manifest['fst_id']} | (none) |  |  |  |  |  |  |  |  |  |")
+
+    lines.append("")
+    lines.append("Notes:")
+    lines.append(
+        "- Top-level values are computed from each FST LVM in the 50-90 ms " "post-burst window."
+    )
+    lines.append(
+        "- Runs containing `scale` or `cal` in their IDs are marked as support runs "
+        "in detailed sections and excluded when picking a primary rate for the "
+        "overview table."
+    )
     lines.append("")
     lines.append(f"FST count: **{len(discovery.fsts)}**")
     lines.append("")
@@ -172,31 +372,37 @@ def build_campaign_summary_markdown(campaign_root: Path) -> str:
         lines.append("")
         lines.append(f"## {fst.normalized_name}")
         lines.append("")
+
+        if manifest["condition_notes"]:
+            lines.append("### LVM condition notes")
+            lines.append("")
+            for note in manifest["condition_notes"]:
+                lines.append(f"- {note}")
+            lines.append("")
+
         lines.append("### Diagnostics")
         lines.append("")
         lines.append("| Diagnostic | Known | Runs |")
         lines.append("| --- | :---: | ---: |")
         for diagnostic in manifest["diagnostics"]:
             known = "yes" if diagnostic["is_known"] else "no"
-            lines.append(
-                f"| {diagnostic['name']} | {known} | {diagnostic['run_count']} |"
-            )
+            lines.append(f"| {diagnostic['name']} | {known} | {diagnostic['run_count']} |")
 
         lines.append("")
         lines.append("### Runs")
         lines.append("")
-        lines.append("| Diagnostic | Run ID | Inferred rate (Hz) | Notes | Errors |")
-        lines.append("| --- | --- | ---: | --- | --- |")
+        lines.append("| Diagnostic | Run ID | Support run | Inferred rate (Hz) | Notes | Errors |")
+        lines.append("| --- | --- | :---: | ---: | --- | --- |")
         if manifest["runs"]:
             for run in manifest["runs"]:
                 rate = "" if run["inferred_rate_hz"] is None else f"{run['inferred_rate_hz']:.3f}"
                 notes = "; ".join(run["notes"]) if run["notes"] else ""
                 errors = "; ".join(run["errors"]) if run["errors"] else ""
-                lines.append(
-                    f"| {run['diagnostic']} | {run['run_id']} | {rate} | {notes} | {errors} |"
-                )
+                support = "yes" if run["is_support_run"] else "no"
+                run_row = [run["diagnostic"], run["run_id"], support, rate, notes, errors]
+                lines.append("| " + " | ".join(run_row) + " |")
         else:
-            lines.append("| (none) | (none) |  |  |  |")
+            lines.append("| (none) | (none) |  |  |  |  |")
 
     lines.append("")
     return "\n".join(lines)

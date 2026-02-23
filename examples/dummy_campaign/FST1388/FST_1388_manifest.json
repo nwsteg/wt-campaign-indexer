@@ -15,6 +15,7 @@
       "diagnostic": "pls",
       "cihx_path": "examples/dummy_campaign/FST1388/pls/run_S0001/run_S0001.cihx",
       "inferred_rate_hz": null,
+      "is_support_run": false,
       "notes": [
         "Unable to infer frame rate from .cihx metadata."
       ],
@@ -25,27 +26,34 @@
       "diagnostic": "pls",
       "cihx_path": "examples/dummy_campaign/FST1388/pls/scale_S0001/scale_S0001.cihx",
       "inferred_rate_hz": null,
+      "is_support_run": true,
       "notes": [
-        "Unable to infer frame rate from .cihx metadata."
+        "Unable to infer frame rate from .cihx metadata.",
+        "Support run (scale/cal); not treated as primary flow data."
       ],
       "errors": []
     }
   ],
   "condition_summary": {
-    "p0": null,
-    "T0": null,
-    "Re_1": null,
-    "p0j": null,
-    "p0j/p0": null,
-    "p0j/pinf": null,
-    "J": null
+    "p0": 415.62194371641795,
+    "T0": 296.85674000000006,
+    "Re_1": 634308011.0089461,
+    "p0j": 299.2161050099503,
+    "T0j": 298.07954699999993,
+    "p0j/p0": 0.7199237420777469,
+    "p0j/pinf": 20.354837075506826,
+    "J": 0.7184455586608613
   },
+  "condition_notes": [
+    "Steady-state window: 50-90 ms after burst (indices 744-944)."
+  ],
   "units": {
     "condition_summary": {
-      "p0": "Pa",
+      "p0": "psia",
       "T0": "K",
       "Re_1": "1/m",
-      "p0j": "Pa",
+      "p0j": "psia",
+      "T0j": "K",
       "p0j/p0": "1",
       "p0j/pinf": "1",
       "J": "1"
@@ -53,7 +61,8 @@
     "runs": {
       "inferred_rate_hz": "Hz",
       "run_id": null,
-      "cihx_path": null
+      "cihx_path": null,
+      "is_support_run": null
     }
   }
 }
