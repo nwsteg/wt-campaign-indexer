@@ -54,6 +54,8 @@ def read_lvm_data(
     header_names = [str(col).strip() for col in headers.iloc[0]]
     expected_cols = len(header_names)
 
+    selected_usecols = usecols if usecols is not None else list(range(expected_cols))
+
     df = pd.read_csv(
         file_path,
         sep="\t",
@@ -63,7 +65,7 @@ def read_lvm_data(
         low_memory=True,
         on_bad_lines="skip",
         skiprows=lambda x: not keep_row(x),
-        usecols=list(range(expected_cols)),
+        usecols=selected_usecols,
     )
     df.columns = header_names
     for column in df.columns:
