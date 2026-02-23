@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import math
 import re
@@ -58,15 +59,135 @@ def infer_rate_from_cihx(cihx_path: Path) -> float | None:
     return None
 
 
-def infer_rate_from_hcc(hcc_path: Path) -> float | None:
-    text = hcc_path.read_text(encoding="utf-8", errors="replace")
-    for pattern in _HCC_RATE_PATTERNS:
-        match = pattern.search(text)
-        if match:
+def _to_positive_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(rate) or rate <= 0:
+        return None
+    return rate
+
+
+def _infer_rate_from_telops_hcc(hcc_path: Path) -> float | None:
+    """Try Telops-native readers first when available."""
+    for module_name in ("telops_hcc", "telops_hccpy", "telops"):
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+
+        # Common style: module.open(path) -> object with a frame-rate attribute.
+        open_fn = getattr(module, "open", None)
+        if callable(open_fn):
             try:
-                return float(match.group(1))
-            except ValueError:
-                return None
+                opened = open_fn(str(hcc_path))
+            except Exception:
+                opened = None
+
+            if opened is not None:
+                for attr in (
+                    "frame_rate",
+                    "framerate",
+                    "fps",
+                    "acquisition_frame_rate",
+                    "record_rate",
+                ):
+                    rate = _to_positive_float(getattr(opened, attr, None))
+                    if rate is not None:
+                        close_fn = getattr(opened, "close", None)
+                        if callable(close_fn):
+                            close_fn()
+                        return rate
+
+                close_fn = getattr(opened, "close", None)
+                if callable(close_fn):
+                    close_fn()
+
+        # Common style: module.Reader(path) / module.HccFile(path).
+        for cls_name in ("Reader", "HccFile", "HCCFile", "HccReader"):
+            cls = getattr(module, cls_name, None)
+            if cls is None:
+                continue
+            try:
+                reader = cls(str(hcc_path))
+            except Exception:
+                continue
+
+            for attr in (
+                "frame_rate",
+                "framerate",
+                "fps",
+                "acquisition_frame_rate",
+                "record_rate",
+            ):
+                rate = _to_positive_float(getattr(reader, attr, None))
+                if rate is not None:
+                    close_fn = getattr(reader, "close", None)
+                    if callable(close_fn):
+                        close_fn()
+                    return rate
+
+            close_fn = getattr(reader, "close", None)
+            if callable(close_fn):
+                close_fn()
+
+    return None
+
+
+def _infer_rate_from_av(hcc_path: Path) -> float | None:
+    try:
+        av = importlib.import_module("av")
+    except ImportError:
+        return None
+
+    try:
+        container = av.open(str(hcc_path))
+    except Exception:
+        return None
+
+    try:
+        for stream in container.streams:
+            for attr in ("average_rate", "base_rate", "guessed_rate", "rate"):
+                rate = _to_positive_float(getattr(stream, attr, None))
+                if rate is not None:
+                    return rate
+    finally:
+        container.close()
+
+    return None
+
+
+def _infer_rate_from_imageio(hcc_path: Path) -> float | None:
+    try:
+        imageio_v3 = importlib.import_module("imageio.v3")
+    except ImportError:
+        return None
+
+    try:
+        metadata = imageio_v3.immeta(str(hcc_path))
+    except Exception:
+        return None
+
+    if not isinstance(metadata, dict):
+        return None
+
+    for key in ("fps", "frame_rate", "framerate", "record_rate"):
+        rate = _to_positive_float(metadata.get(key))
+        if rate is not None:
+            return rate
+
+    return None
+
+
+def infer_rate_from_hcc(hcc_path: Path) -> float | None:
+    """Infer HCC frame rate using binary-capable readers (no text/regex parsing)."""
+    for parser in (_infer_rate_from_telops_hcc, _infer_rate_from_av, _infer_rate_from_imageio):
+        rate = parser(hcc_path)
+        if rate is not None:
+            return rate
     return None
 
 
@@ -541,14 +662,11 @@ def write_campaign_summary(
     jet_mach: float | None = None,
 ) -> Path:
     output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        build_campaign_summary_markdown(
-            campaign_root,
-            tunnel_mach=tunnel_mach,
-            jet_used=jet_used,
-            jet_mach=jet_mach,
-        ),
-        encoding="utf-8",
+    markdown = build_campaign_summary_markdown(
+        campaign_root,
+        tunnel_mach=tunnel_mach,
+        jet_used=jet_used,
+        jet_mach=jet_mach,
     )
+    output_path.write_text(markdown, encoding="utf-8")
     return output_path
