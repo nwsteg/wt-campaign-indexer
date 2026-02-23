@@ -20,6 +20,7 @@ dev = [
 [project.scripts]
 wtt-make-lvm-fixture = "wtt_campaign_indexer.cli:main"
 wtt-plot-lvm-fixture = "wtt_campaign_indexer.plot_cli:main"
+wtt-write-campaign-summary = "wtt_campaign_indexer.manifest_cli:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

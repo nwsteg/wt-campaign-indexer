@@ -73,7 +73,9 @@ def discover_campaign(campaign_root: Path) -> CampaignDiscovery:
 
 def _pick_primary_lvm(fst_dir: Path, fst_number: int) -> Path | None:
     lvm_candidates = sorted(
-        candidate for candidate in fst_dir.iterdir() if candidate.is_file() and candidate.suffix == ".lvm"
+        candidate
+        for candidate in fst_dir.iterdir()
+        if candidate.is_file() and candidate.suffix == ".lvm"
     )
     if not lvm_candidates:
         return None

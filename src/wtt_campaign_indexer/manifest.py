@@ -43,7 +43,11 @@ def find_lvm_fixture_path(fst: FSTDiscovery) -> Path | None:
     fixture_candidates = sorted(
         candidate
         for candidate in fst.path.iterdir()
-        if candidate.is_file() and candidate.suffix.lower() == ".lvm" and "fixture" in candidate.stem.lower()
+        if (
+            candidate.is_file()
+            and candidate.suffix.lower() == ".lvm"
+            and "fixture" in candidate.stem.lower()
+        )
     )
     if len(fixture_candidates) == 1:
         return fixture_candidates[0]
@@ -140,3 +144,66 @@ def write_fst_manifest(fst: FSTDiscovery) -> Path:
 def write_campaign_manifests(campaign_root: Path) -> tuple[Path, ...]:
     discovery = discover_campaign(campaign_root)
     return tuple(write_fst_manifest(fst) for fst in discovery.fsts)
+
+
+def build_campaign_summary_markdown(campaign_root: Path) -> str:
+    discovery = discover_campaign(campaign_root)
+    lines: list[str] = []
+    lines.append("# Dummy campaign summary")
+    lines.append("")
+    lines.append(f"Campaign root: `{Path(campaign_root)}`")
+    lines.append("")
+    lines.append(f"FST count: **{len(discovery.fsts)}**")
+    lines.append("")
+    lines.append("## FST overview")
+    lines.append("")
+    lines.append("| FST | LVM | Diagnostic count | Run count |")
+    lines.append("| --- | --- | ---: | ---: |")
+
+    for fst in discovery.fsts:
+        run_count = sum(len(diag.runs) for diag in fst.diagnostics)
+        lvm_name = fst.primary_lvm.name if fst.primary_lvm else "(missing)"
+        lines.append(
+            f"| {fst.normalized_name} | {lvm_name} | {len(fst.diagnostics)} | {run_count} |"
+        )
+
+    for fst in discovery.fsts:
+        manifest = build_fst_manifest(fst)
+        lines.append("")
+        lines.append(f"## {fst.normalized_name}")
+        lines.append("")
+        lines.append("### Diagnostics")
+        lines.append("")
+        lines.append("| Diagnostic | Known | Runs |")
+        lines.append("| --- | :---: | ---: |")
+        for diagnostic in manifest["diagnostics"]:
+            known = "yes" if diagnostic["is_known"] else "no"
+            lines.append(
+                f"| {diagnostic['name']} | {known} | {diagnostic['run_count']} |"
+            )
+
+        lines.append("")
+        lines.append("### Runs")
+        lines.append("")
+        lines.append("| Diagnostic | Run ID | Inferred rate (Hz) | Notes | Errors |")
+        lines.append("| --- | --- | ---: | --- | --- |")
+        if manifest["runs"]:
+            for run in manifest["runs"]:
+                rate = "" if run["inferred_rate_hz"] is None else f"{run['inferred_rate_hz']:.3f}"
+                notes = "; ".join(run["notes"]) if run["notes"] else ""
+                errors = "; ".join(run["errors"]) if run["errors"] else ""
+                lines.append(
+                    f"| {run['diagnostic']} | {run['run_id']} | {rate} | {notes} | {errors} |"
+                )
+        else:
+            lines.append("| (none) | (none) |  |  |  |")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_campaign_summary(campaign_root: Path, output_path: Path) -> Path:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(build_campaign_summary_markdown(campaign_root), encoding="utf-8")
+    return output_path

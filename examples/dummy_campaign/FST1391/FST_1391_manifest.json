@@ -1,0 +1,84 @@
+{
+  "fst_id": "FST_1391",
+  "lvm_path": "examples/dummy_campaign/FST1391/FST_1391.lvm",
+  "lvm_fixture_path": null,
+  "diagnostics": [
+    {
+      "name": "piv",
+      "is_known": true,
+      "run_count": 3
+    },
+    {
+      "name": "shift",
+      "is_known": false,
+      "run_count": 1
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "cal_S0001",
+      "diagnostic": "piv",
+      "cihx_path": "examples/dummy_campaign/FST1391/piv/cal_S0001/cal_S0001.cihx",
+      "inferred_rate_hz": null,
+      "notes": [
+        "Unable to infer frame rate from .cihx metadata."
+      ],
+      "errors": []
+    },
+    {
+      "run_id": "run_S0001",
+      "diagnostic": "piv",
+      "cihx_path": "examples/dummy_campaign/FST1391/piv/run_S0001/run_S0001.cihx",
+      "inferred_rate_hz": null,
+      "notes": [
+        "Unable to infer frame rate from .cihx metadata."
+      ],
+      "errors": []
+    },
+    {
+      "run_id": "scale_S0001",
+      "diagnostic": "piv",
+      "cihx_path": "examples/dummy_campaign/FST1391/piv/scale_S0001/scale_S0001.cihx",
+      "inferred_rate_hz": null,
+      "notes": [
+        "Unable to infer frame rate from .cihx metadata."
+      ],
+      "errors": []
+    },
+    {
+      "run_id": "shift_S0001",
+      "diagnostic": "shift",
+      "cihx_path": "examples/dummy_campaign/FST1391/shift/shift_S0001/shift_S0001.cihx",
+      "inferred_rate_hz": null,
+      "notes": [
+        "Unable to infer frame rate from .cihx metadata."
+      ],
+      "errors": []
+    }
+  ],
+  "condition_summary": {
+    "p0": null,
+    "T0": null,
+    "Re_1": null,
+    "p0j": null,
+    "p0j/p0": null,
+    "p0j/pinf": null,
+    "J": null
+  },
+  "units": {
+    "condition_summary": {
+      "p0": "Pa",
+      "T0": "K",
+      "Re_1": "1/m",
+      "p0j": "Pa",
+      "p0j/p0": "1",
+      "p0j/pinf": "1",
+      "J": "1"
+    },
+    "runs": {
+      "inferred_rate_hz": "Hz",
+      "run_id": null,
+      "cihx_path": null
+    }
+  }
+}
