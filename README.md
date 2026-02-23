@@ -130,6 +130,8 @@ wtt-write-campaign-summary \
   --jet-mach 3.09
 ```
 
+The CLI prints per-folder progress (for example, `Processing FST_1391...`) while manifests/summary are being built.
+
 If `--jet-used`/`--no-jet-used` is omitted and you run in an interactive terminal, the CLI will prompt whether a jet was used and (if yes) ask for jet Mach.
 
 To skip an FST folder from manifest/summary generation, add a `skip.txt` file in that FST folder root (for example: `FST1391/skip.txt`).

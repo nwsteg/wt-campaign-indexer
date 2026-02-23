@@ -10,6 +10,10 @@ from wtt_campaign_indexer.manifest import (
 )
 
 
+def _print_progress(message: str) -> None:
+    print(message)
+
+
 def _prompt_bool(prompt: str, default: bool) -> bool:
     suffix = "[Y/n]" if default else "[y/N]"
     raw = input(f"{prompt} {suffix}: ").strip().lower()
@@ -90,6 +94,7 @@ def main() -> None:
         tunnel_mach=args.tunnel_mach,
         jet_used=jet_used,
         jet_mach=jet_mach,
+        progress_callback=_print_progress,
     )
     summary_path = write_campaign_summary(
         args.campaign_root,
@@ -97,6 +102,7 @@ def main() -> None:
         tunnel_mach=args.tunnel_mach,
         jet_used=jet_used,
         jet_mach=jet_mach,
+        progress_callback=_print_progress,
     )
     print(f"Wrote {len(manifest_paths)} manifest files")
     print(f"Wrote summary to {summary_path}")
