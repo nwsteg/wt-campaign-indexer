@@ -1,0 +1,22 @@
+{
+  "input_path": "G:\\2025 JICF6 PLS Exploratory\\FST1388\\FST_1388.lvm",
+  "output_path": "examples\\dummy_campaign\\FST1388\\FST_1388.lvm",
+  "fs_hz": 4999.999999834017,
+  "effective_fs_hz": 4999.999999834017,
+  "read_every_n": 1,
+  "trigger_index_in_fixture": 500,
+  "burst_index_in_fixture": 494,
+  "pre_ms": 100.0,
+  "post_ms": 200.0,
+  "decimation": 1,
+  "trigger_channel": "Voltage",
+  "burst_channel": "PLEN-PT",
+  "plot_plenum_channel": "PLEN-PT",
+  "trigger_candidates_input_indices": [
+    3188365,
+    3188371,
+    3188377,
+    3190867,
+    3190873
+  ]
+}
