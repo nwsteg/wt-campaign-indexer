@@ -4,6 +4,7 @@ from pathlib import Path
 from wtt_campaign_indexer.discovery import discover_campaign
 from wtt_campaign_indexer.manifest import (
     build_campaign_summary_markdown,
+    infer_rate_from_cihx,
     write_campaign_summary,
     write_fst_manifest,
 )
@@ -120,3 +121,10 @@ def test_write_campaign_summary_writes_file(tmp_path: Path):
     assert result_path == output_path
     assert output_path.exists()
     assert "FST_1391" in output_path.read_text(encoding="utf-8")
+
+
+def test_infer_rate_supports_record_rate_pattern(tmp_path: Path):
+    cihx = tmp_path / "meta.cihx"
+    cihx.write_text("recordRate=20000", encoding="utf-8")
+
+    assert infer_rate_from_cihx(cihx) == 20000.0

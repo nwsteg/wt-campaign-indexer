@@ -19,10 +19,9 @@
       "run_id": "cal_S0001",
       "diagnostic": "piv",
       "cihx_path": "examples/dummy_campaign/FST1391/piv/cal_S0001/cal_S0001.cihx",
-      "inferred_rate_hz": null,
+      "inferred_rate_hz": 500.0,
       "is_support_run": true,
       "notes": [
-        "Unable to infer frame rate from .cihx metadata.",
         "Support run (scale/cal); not treated as primary flow data."
       ],
       "errors": []
@@ -31,21 +30,18 @@
       "run_id": "run_S0001",
       "diagnostic": "piv",
       "cihx_path": "examples/dummy_campaign/FST1391/piv/run_S0001/run_S0001.cihx",
-      "inferred_rate_hz": null,
+      "inferred_rate_hz": 100000.0,
       "is_support_run": false,
-      "notes": [
-        "Unable to infer frame rate from .cihx metadata."
-      ],
+      "notes": [],
       "errors": []
     },
     {
       "run_id": "scale_S0001",
       "diagnostic": "piv",
       "cihx_path": "examples/dummy_campaign/FST1391/piv/scale_S0001/scale_S0001.cihx",
-      "inferred_rate_hz": null,
+      "inferred_rate_hz": 500.0,
       "is_support_run": true,
       "notes": [
-        "Unable to infer frame rate from .cihx metadata.",
         "Support run (scale/cal); not treated as primary flow data."
       ],
       "errors": []
@@ -54,26 +50,25 @@
       "run_id": "shift_S0001",
       "diagnostic": "shift",
       "cihx_path": "examples/dummy_campaign/FST1391/shift/shift_S0001/shift_S0001.cihx",
-      "inferred_rate_hz": null,
+      "inferred_rate_hz": 10000.0,
       "is_support_run": false,
-      "notes": [
-        "Unable to infer frame rate from .cihx metadata."
-      ],
+      "notes": [],
       "errors": []
     }
   ],
   "condition_summary": {
     "p0": 418.6696529303482,
-    "T0": 295.5796878472505,
-    "Re_1": 642474506.6559926,
-    "p0j": 300.43434954726365,
-    "T0j": 296.1154591710794,
-    "p0j/p0": 0.7175928502208525,
-    "p0j/pinf": 20.43771085355535,
-    "J": 0.7169433742757705
+    "T0": 298.92343433808554,
+    "Re_1": 633347723.5741055,
+    "p0j": 105.03094549751245,
+    "T0j": 300.0,
+    "p0j/p0": 0.25086830335655086,
+    "p0j/pinf": 7.1449622787423435,
+    "J": 0.25041777180252417
   },
   "condition_notes": [
-    "Steady-state window: 50-90 ms after burst (indices 738-938)."
+    "Steady-state window: 50-90 ms after burst (indices 738-938).",
+    "T0j assumed constant at 300 K."
   ],
   "units": {
     "condition_summary": {

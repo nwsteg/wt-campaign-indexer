@@ -27,11 +27,13 @@ _CONDITION_UNITS = {
 _RATE_PATTERNS = (
     re.compile(r"AcquisitionFrameRate[^0-9]*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
     re.compile(r"<FrameRate[^>]*>([0-9]+(?:\.[0-9]+)?)</FrameRate>", re.IGNORECASE),
+    re.compile(r"recordRate[^0-9]*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
 )
 
 _STEADY_STATE_START_MS = 50.0
 _STEADY_STATE_END_MS = 90.0
 _PINF_PSIA = 14.7
+_ASSUMED_T0J_K = 300.0
 
 
 def infer_rate_from_cihx(cihx_path: Path) -> float | None:
@@ -109,18 +111,16 @@ def compute_steady_state_conditions(
     window = df.iloc[start_idx : end_idx + 1]
 
     p0 = _select_channel(window, "PLEN-PT")
-    t0 = _select_channel(window, "TC 1", "TC 2", "TC 3")
-    p0j = _select_channel(window, "DT-PT 1", "BT-PT", "TRIG-PT")
-    t0j = _select_channel(window, "TC 2", "TC 1", "TC 3")
+    t0 = _select_channel(window, "TC 8")
+    p0j = _select_channel(window, "LVDT")
+    t0j = _ASSUMED_T0J_K
 
     if p0 is None:
         notes.append("Channel 'PLEN-PT' not found; p0 unavailable.")
     if t0 is None:
-        notes.append("No TC channel found for T0.")
+        notes.append("Channel 'TC 8' not found; T0 unavailable.")
     if p0j is None:
-        notes.append("No jet pressure channel found for p0j.")
-    if t0j is None:
-        notes.append("No TC channel found for T0j.")
+        notes.append("Channel 'LVDT' not found; p0j unavailable.")
 
     p0j_over_p0 = (p0j / p0) if (p0 and p0j and p0 != 0) else None
     p0j_over_pinf = (p0j / _PINF_PSIA) if p0j is not None else None
@@ -138,6 +138,7 @@ def compute_steady_state_conditions(
         f"{_STEADY_STATE_START_MS:.0f}-{_STEADY_STATE_END_MS:.0f} ms after burst "
         f"(indices {start_idx}-{end_idx})."
     )
+    notes.append(f"T0j assumed constant at {_ASSUMED_T0J_K:.0f} K.")
 
     return (
         OrderedDict(
