@@ -115,3 +115,17 @@ def test_ir_is_known_and_hcc_runs_are_discovered(tmp_path: Path):
     assert run.name == "run_S0002"
     assert [path.name for path in run.hcc_files] == ["run_S0002.hcc"]
     assert run.cihx_files == ()
+
+
+def test_skip_txt_excludes_fst_from_discovery(tmp_path: Path):
+    fst_keep = tmp_path / "FST1401"
+    fst_skip = tmp_path / "FST1402"
+    fst_keep.mkdir()
+    fst_skip.mkdir()
+    _touch(fst_keep / "FST_1401.lvm")
+    _touch(fst_skip / "FST_1402.lvm")
+    _touch(fst_skip / "skip.txt")
+
+    result = discover_campaign(tmp_path)
+
+    assert [fst.normalized_name for fst in result.fsts] == ["FST_1401"]
