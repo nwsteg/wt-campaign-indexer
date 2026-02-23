@@ -37,6 +37,10 @@ _CIHX_RATE_PATTERNS = (
     re.compile(r"recordRate[^0-9]*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
 )
 
+_HCC_RATE_PATTERNS = (
+    re.compile(r"(?:frame(?:_|\s*)rate|framerate|fps)[^0-9]*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+)
+
 _STEADY_STATE_START_MS = 50.0
 _STEADY_STATE_END_MS = 90.0
 _ASSUMED_T0J_K = 300.0
