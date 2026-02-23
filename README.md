@@ -95,6 +95,17 @@ wtt-plot-lvm-fixture \
 3. Keep tiny `.cihx` metadata files in diagnostic `run_*` directories.
 4. Optionally keep one tiny non-camera CSV diagnostic (for future rate inference tests).
 
+
+## CLI: write campaign manifests + summary
+
+Point the tool at a campaign root (including `examples/dummy_campaign`) to generate one manifest per FST plus a markdown health-check summary.
+
+```bash
+wtt-write-campaign-summary \
+  --campaign-root examples/dummy_campaign \
+  --summary-output examples/dummy_campaign/campaign_summary.md
+```
+
 ## Quality checks
 
 ```bash

@@ -4,8 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-KNOWN_DIAGNOSTICS = ("schlieren", "plif", "tracking", "piv", "kulite")
-CAMERA_DIAGNOSTICS = {"schlieren", "plif", "tracking", "piv"}
+KNOWN_DIAGNOSTICS = ("schlieren", "plif", "pls", "tracking", "piv", "kulite")
 _FST_PATTERN = re.compile(r"^FST_?(\d+)$", re.IGNORECASE)
 
 
@@ -74,7 +73,9 @@ def discover_campaign(campaign_root: Path) -> CampaignDiscovery:
 
 def _pick_primary_lvm(fst_dir: Path, fst_number: int) -> Path | None:
     lvm_candidates = sorted(
-        candidate for candidate in fst_dir.iterdir() if candidate.is_file() and candidate.suffix == ".lvm"
+        candidate
+        for candidate in fst_dir.iterdir()
+        if candidate.is_file() and candidate.suffix == ".lvm"
     )
     if not lvm_candidates:
         return None
@@ -94,10 +95,7 @@ def _discover_diagnostics(fst_dir: Path) -> tuple[DiagnosticDiscovery, ...]:
     for child in sorted(entry for entry in fst_dir.iterdir() if entry.is_dir()):
         diagnostic_name = child.name.lower()
         is_known = diagnostic_name in known
-        runs: tuple[RunDiscovery, ...] = ()
-
-        if diagnostic_name in CAMERA_DIAGNOSTICS:
-            runs = _discover_runs(child)
+        runs = _discover_runs(child)
 
         diagnostics.append(
             DiagnosticDiscovery(
@@ -115,10 +113,7 @@ def _discover_diagnostics(fst_dir: Path) -> tuple[DiagnosticDiscovery, ...]:
 def _discover_runs(diagnostic_dir: Path) -> tuple[RunDiscovery, ...]:
     runs: list[RunDiscovery] = []
 
-    for child in sorted(entry for entry in diagnostic_dir.iterdir() if entry.is_dir()):
-        if not child.name.lower().startswith("run_"):
-            continue
-
+    for child in sorted(entry for entry in diagnostic_dir.rglob("*") if entry.is_dir()):
         cihx_files = tuple(
             sorted(
                 candidate
@@ -126,7 +121,11 @@ def _discover_runs(diagnostic_dir: Path) -> tuple[RunDiscovery, ...]:
                 if candidate.is_file() and candidate.suffix.lower() == ".cihx"
             )
         )
-        runs.append(RunDiscovery(name=child.name, path=child, cihx_files=cihx_files))
+        if not cihx_files:
+            continue
+
+        run_name = str(child.relative_to(diagnostic_dir))
+        runs.append(RunDiscovery(name=run_name, path=child, cihx_files=cihx_files))
 
     runs.sort(key=lambda run: run.name)
     return tuple(runs)
