@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+.pytest_cache/
+# generated example artifacts
+examples/dummy_campaign/*/FST_*_fixture.lvm
+examples/dummy_campaign/*/FST_*_fixture.json
+examples/dummy_campaign/*/FST_*_fixture_check.png
