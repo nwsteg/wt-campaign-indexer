@@ -1,0 +1,78 @@
+{
+  "fst_id": "FST_1388",
+  "lvm_path": "examples/dummy_campaign/FST1388/FST_1388.lvm",
+  "lvm_fixture_path": null,
+  "tunnel_mach": 7.2,
+  "jet_used": true,
+  "jet_mach": 3.09,
+  "diagnostics": [
+    {
+      "name": "pls",
+      "is_known": true,
+      "run_count": 2
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "run_S0001",
+      "diagnostic": "pls",
+      "cihx_path": "examples/dummy_campaign/FST1388/pls/run_S0001/run_S0001.cihx",
+      "inferred_rate_hz": 100000.0,
+      "is_support_run": false,
+      "notes": [],
+      "errors": []
+    },
+    {
+      "run_id": "scale_S0001",
+      "diagnostic": "pls",
+      "cihx_path": "examples/dummy_campaign/FST1388/pls/scale_S0001/scale_S0001.cihx",
+      "inferred_rate_hz": 50.0,
+      "is_support_run": true,
+      "notes": [
+        "Support run (scale/cal); not treated as primary flow data."
+      ],
+      "errors": []
+    }
+  ],
+  "condition_summary": {
+    "p0": 415.62194371641795,
+    "T0": 300.368798,
+    "Re_1": 624932317.4724255,
+    "p0j": 88.82680706467661,
+    "T0j": 300.0,
+    "pinf": 0.08390816853631966,
+    "pinf_ref_jet_mach": 9.891713122660256,
+    "pj": 2.1140589575924356,
+    "p0j/pinf": 1058.6193050588147,
+    "pj/pinf": 25.19491241996737,
+    "J": 4.640500449017948
+  },
+  "condition_notes": [
+    "Steady-state window: 50-90 ms after burst (indices 744-944).",
+    "T0j assumed constant at 300 K.",
+    "pinf computed from p0 using isentropic relation at M=7.2.",
+    "Reference pinf at jet Mach from p0 uses M=3.09.",
+    "pj computed from p0j using isentropic relation at jet M=3.09."
+  ],
+  "units": {
+    "condition_summary": {
+      "p0": "psia",
+      "T0": "K",
+      "Re_1": "1/m",
+      "p0j": "psia",
+      "T0j": "K",
+      "pinf": "psia",
+      "pinf_ref_jet_mach": "psia",
+      "pj": "psia",
+      "p0j/pinf": "1",
+      "pj/pinf": "1",
+      "J": "1"
+    },
+    "runs": {
+      "inferred_rate_hz": "Hz",
+      "run_id": null,
+      "cihx_path": null,
+      "is_support_run": null
+    }
+  }
+}
