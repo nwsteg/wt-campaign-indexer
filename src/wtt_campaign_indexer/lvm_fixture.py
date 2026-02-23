@@ -19,6 +19,15 @@ class DetectionResult:
     trigger_candidates: list[int]
 
 
+@dataclass(frozen=True)
+class FailedBurstResult:
+    rise_idx: int
+    drop_idx: int
+    rise_to_drop_ms: float
+    rise_grad: float
+    drop_grad: float
+
+
 def read_lvm_data(
     file_path: Path,
     header_row_index: int = 23,
@@ -131,6 +140,63 @@ def pick_trigger_and_burst(
 
     return DetectionResult(
         trigger_idx=int(chosen), burst_idx=burst_idx, trigger_candidates=candidates
+    )
+
+
+def pick_failed_burst_drop(
+    df: pd.DataFrame,
+    burst_channel: str = "PLEN-PT",
+    rolling_burst: int = 100,
+    min_rise_to_drop_ms: float = 500.0,
+    min_drop_to_rise_grad_ratio: float = 0.5,
+    fs_hz: float | None = None,
+) -> FailedBurstResult:
+    """Detect a likely failed-burst event anchored on plenum-pressure decrease.
+
+    A failed burst is defined as a slow plenum rise followed by a relatively quick fall.
+    """
+    if burst_channel not in df.columns:
+        raise ValueError(
+            f"Burst/plenum channel '{burst_channel}' not found in columns: {list(df.columns)}"
+        )
+    plenum_grad = _rolling_gradient(df[burst_channel], rolling_burst)
+    drop_idx = int(np.argmin(plenum_grad))
+
+    pre_drop_grad = plenum_grad[:drop_idx] if drop_idx > 0 else np.array([], dtype=float)
+    if pre_drop_grad.size == 0:
+        raise ValueError(
+            "Could not confirm a plenum rise before the drop; failed-burst signature not found."
+        )
+
+    rise_idx = int(np.argmax(pre_drop_grad))
+    rise_grad = float(pre_drop_grad[rise_idx])
+    drop_grad = float(plenum_grad[drop_idx])
+    if rise_grad <= 0:
+        raise ValueError(
+            "Could not confirm a plenum rise before the drop; failed-burst signature not found."
+        )
+
+    inferred_fs = infer_sample_rate_hz(df) if fs_hz is None else fs_hz
+    rise_to_drop_ms = (drop_idx - rise_idx) * 1000.0 / inferred_fs
+    if rise_to_drop_ms < min_rise_to_drop_ms:
+        raise ValueError(
+            "Rise-to-drop duration is too short for failed-burst mode "
+            f"({rise_to_drop_ms:.1f} ms < {min_rise_to_drop_ms:.1f} ms)."
+        )
+
+    drop_to_rise_ratio = abs(drop_grad) / rise_grad
+    if drop_to_rise_ratio < min_drop_to_rise_grad_ratio:
+        raise ValueError(
+            "Plenum fall is not sufficiently sharper than rise for failed-burst mode "
+            f"(ratio={drop_to_rise_ratio:.2f} < {min_drop_to_rise_grad_ratio:.2f})."
+        )
+
+    return FailedBurstResult(
+        rise_idx=rise_idx,
+        drop_idx=drop_idx,
+        rise_to_drop_ms=float(rise_to_drop_ms),
+        rise_grad=float(rise_grad),
+        drop_grad=float(drop_grad),
     )
 
 
@@ -294,6 +360,9 @@ def create_lvm_fixture(
     metadata_json_path: Path | None = None,
     plot_output_path: Path | None = None,
     plot_plenum_channel: str = "PLEN-PT",
+    window_anchor: str = "trigger",
+    failed_burst_min_rise_to_drop_ms: float = 500.0,
+    failed_burst_min_drop_to_rise_grad_ratio: float = 0.5,
 ) -> dict:
     if decimate < 1:
         raise ValueError("--decimate must be >= 1")
@@ -335,13 +404,30 @@ def create_lvm_fixture(
                 header_row_index = auto_idx
                 lines = read_prefix_lines(input_path, stop_row=header_row_index)
 
-    detection = pick_trigger_and_burst(
-        df,
-        trigger_channel=trigger_channel,
-        burst_channel=burst_channel,
-        rolling_trigger=rolling_trigger,
-        rolling_burst=rolling_burst,
-    )
+    if window_anchor not in {"trigger", "failed-burst-drop"}:
+        raise ValueError("--window-anchor must be 'trigger' or 'failed-burst-drop'")
+
+    detection: DetectionResult | None = None
+    failed_burst_detection: FailedBurstResult | None = None
+    if window_anchor == "trigger":
+        detection = pick_trigger_and_burst(
+            df,
+            trigger_channel=trigger_channel,
+            burst_channel=burst_channel,
+            rolling_trigger=rolling_trigger,
+            rolling_burst=rolling_burst,
+        )
+    else:
+        if not burst_channel:
+            raise ValueError("--burst-channel is required when --window-anchor=failed-burst-drop")
+        failed_burst_detection = pick_failed_burst_drop(
+            df,
+            burst_channel=burst_channel,
+            rolling_burst=rolling_burst,
+            min_rise_to_drop_ms=failed_burst_min_rise_to_drop_ms,
+            min_drop_to_rise_grad_ratio=failed_burst_min_drop_to_rise_grad_ratio,
+            fs_hz=fs_hz,
+        )
 
     inferred_fs_hz = infer_sample_rate_hz(df) * read_every_n
     fs_hz = fs_hz if fs_hz is not None else inferred_fs_hz
@@ -350,12 +436,20 @@ def create_lvm_fixture(
     pre_samples = int(round(pre_ms * effective_fs_hz / 1000.0))
     post_samples = int(round(post_ms * effective_fs_hz / 1000.0))
 
-    start = max(0, detection.trigger_idx - pre_samples)
-    end_exclusive = min(len(df), detection.trigger_idx + post_samples + 1)
+    anchor_idx = (
+        failed_burst_detection.drop_idx
+        if failed_burst_detection is not None
+        else detection.trigger_idx
+    )
 
-    must_keep = {detection.trigger_idx}
-    if detection.burst_idx is not None:
-        must_keep.add(detection.burst_idx)
+    start = max(0, anchor_idx - pre_samples)
+    end_exclusive = min(len(df), anchor_idx + post_samples + 1)
+
+    must_keep = {anchor_idx}
+    if detection is not None:
+        must_keep.add(detection.trigger_idx)
+        if detection.burst_idx is not None:
+            must_keep.add(detection.burst_idx)
     indices = _select_indices(start, end_exclusive, decimate=decimate, must_keep=must_keep)
 
     fixture_df = df.iloc[indices].copy()
@@ -366,9 +460,16 @@ def create_lvm_fixture(
             file_obj.write(line if line.endswith("\n") else f"{line}\n")
         fixture_df.to_csv(file_obj, sep="\t", index=False, header=False, lineterminator="\n")
 
-    trigger_fixture_idx = indices.index(detection.trigger_idx)
+    anchor_fixture_idx = indices.index(anchor_idx)
+    trigger_fixture_idx = indices.index(detection.trigger_idx) if detection is not None else None
     burst_fixture_idx = (
-        indices.index(detection.burst_idx) if detection.burst_idx in indices else None
+        indices.index(detection.burst_idx)
+        if (
+            detection is not None
+            and detection.burst_idx is not None
+            and detection.burst_idx in indices
+        )
+        else None
     )
 
     metadata = {
@@ -377,15 +478,35 @@ def create_lvm_fixture(
         "fs_hz": float(fs_hz),
         "effective_fs_hz": float(effective_fs_hz),
         "read_every_n": int(read_every_n),
-        "trigger_index_in_fixture": int(trigger_fixture_idx),
+        "trigger_index_in_fixture": (
+            int(trigger_fixture_idx) if trigger_fixture_idx is not None else None
+        ),
         "burst_index_in_fixture": int(burst_fixture_idx) if burst_fixture_idx is not None else None,
+        "window_anchor": window_anchor,
+        "window_anchor_input_index": int(anchor_idx),
+        "window_anchor_index_in_fixture": int(anchor_fixture_idx),
+        "failed_burst_min_rise_to_drop_ms": float(failed_burst_min_rise_to_drop_ms),
+        "failed_burst_min_drop_to_rise_grad_ratio": float(failed_burst_min_drop_to_rise_grad_ratio),
+        "failed_burst_rise_input_index": (
+            int(failed_burst_detection.rise_idx) if failed_burst_detection is not None else None
+        ),
+        "failed_burst_drop_input_index": (
+            int(failed_burst_detection.drop_idx) if failed_burst_detection is not None else None
+        ),
+        "failed_burst_rise_to_drop_ms": (
+            float(failed_burst_detection.rise_to_drop_ms)
+            if failed_burst_detection is not None
+            else None
+        ),
         "pre_ms": float(pre_ms),
         "post_ms": float(post_ms),
         "decimation": int(decimate),
         "trigger_channel": trigger_channel,
         "burst_channel": burst_channel,
         "plot_plenum_channel": plot_plenum_channel,
-        "trigger_candidates_input_indices": detection.trigger_candidates,
+        "trigger_candidates_input_indices": (
+            detection.trigger_candidates if detection is not None else []
+        ),
     }
 
     if metadata_json_path:
@@ -397,7 +518,7 @@ def create_lvm_fixture(
             fixture_df=fixture_df,
             trigger_channel=trigger_channel,
             plen_channel=plot_plenum_channel,
-            trigger_idx_in_fixture=trigger_fixture_idx,
+            trigger_idx_in_fixture=anchor_fixture_idx,
             fs_hz=effective_fs_hz,
             plot_path=plot_output_path,
         )
