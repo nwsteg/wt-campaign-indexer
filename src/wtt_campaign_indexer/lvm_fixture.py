@@ -243,6 +243,41 @@ def write_verification_plot(
     plt.close(fig)
 
 
+def plot_existing_lvm(
+    input_path: Path,
+    plot_output_path: Path,
+    header_row_index: int = 23,
+    trigger_channel: str = "Voltage",
+    plenum_channel: str = "PLEN-PT",
+    fs_hz: float | None = None,
+) -> None:
+    if header_row_index < 0:
+        raise ValueError("--header-row-index must be >= 0")
+
+    data = read_lvm_data(
+        input_path,
+        header_row_index=header_row_index,
+        read_every_n=1,
+    )
+
+    detection = pick_trigger_and_burst(
+        data,
+        trigger_channel=trigger_channel,
+        burst_channel=plenum_channel,
+    )
+    inferred_fs_hz = infer_sample_rate_hz(data)
+    final_fs_hz = fs_hz if fs_hz is not None else inferred_fs_hz
+
+    write_verification_plot(
+        fixture_df=data,
+        trigger_channel=trigger_channel,
+        plen_channel=plenum_channel,
+        trigger_idx_in_fixture=detection.trigger_idx,
+        fs_hz=final_fs_hz,
+        plot_path=plot_output_path,
+    )
+
+
 def create_lvm_fixture(
     input_path: Path,
     output_path: Path,

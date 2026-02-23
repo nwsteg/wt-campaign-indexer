@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from wtt_campaign_indexer.lvm_fixture import create_lvm_fixture
+from wtt_campaign_indexer.lvm_fixture import create_lvm_fixture, plot_existing_lvm
 
 FIXTURE_IN = Path("tests/fixtures/sample_input.lvm")
 
@@ -73,3 +73,30 @@ def test_default_window_is_plus_minus_100ms(tmp_path: Path):
 
     assert metadata["pre_ms"] == 100.0
     assert metadata["post_ms"] == 100.0
+
+
+def test_plot_existing_shortened_lvm(tmp_path: Path):
+    short_path = tmp_path / "short_for_plot.lvm"
+    plot_path = tmp_path / "from_short.png"
+
+    create_lvm_fixture(
+        input_path=FIXTURE_IN,
+        output_path=short_path,
+        trigger_channel="Voltage",
+        burst_channel="PLEN-PT",
+        header_row_index=3,
+        fs_hz=1000.0,
+        pre_ms=2,
+        post_ms=3,
+    )
+
+    plot_existing_lvm(
+        input_path=short_path,
+        plot_output_path=plot_path,
+        header_row_index=3,
+        trigger_channel="Voltage",
+        plenum_channel="PLEN-PT",
+        fs_hz=1000.0,
+    )
+
+    assert plot_path.exists()

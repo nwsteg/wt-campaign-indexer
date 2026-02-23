@@ -63,6 +63,19 @@ wtt-make-lvm-fixture \
 - Detects burst index from `burst-channel` using rolling-mean + gradient argmax.
 - If several trigger candidates are strong, chooses the one nearest burst.
 
+
+
+To validate an already-generated shortened LVM, you can plot directly from it:
+
+```bash
+wtt-plot-lvm-fixture \
+  --input examples/dummy_campaign/FST1391/FST_1391_fixture.lvm \
+  --output examples/dummy_campaign/FST1391/FST_1391_fixture_check.png \
+  --header-row-index 23 \
+  --trigger-channel Voltage \
+  --plenum-channel PLEN-PT
+```
+
 ### Output behavior
 
 - Preserves all pre-data header lines through the detected header row.
