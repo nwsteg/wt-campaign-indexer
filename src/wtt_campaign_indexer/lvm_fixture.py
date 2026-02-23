@@ -34,18 +34,6 @@ def read_lvm_data(
             return False
         return (row_index - header_row_index) % read_every_n == 0
 
-    df = pd.read_csv(
-        file_path,
-        sep="\t",
-        header=None,
-        engine="c",
-        na_values=[""],
-        low_memory=True,
-        on_bad_lines="warn",
-        skiprows=lambda x: not keep_row(x),
-        usecols=usecols,
-    )
-
     headers = pd.read_csv(
         file_path,
         sep="\t",
@@ -54,8 +42,21 @@ def read_lvm_data(
         skiprows=header_row_index,
         usecols=usecols,
     )
+    header_names = [str(col).strip() for col in headers.iloc[0]]
+    expected_cols = len(header_names)
 
-    df.columns = [str(col).strip() for col in headers.iloc[0]]
+    df = pd.read_csv(
+        file_path,
+        sep="\t",
+        header=None,
+        engine="c",
+        na_values=[""],
+        low_memory=True,
+        on_bad_lines="skip",
+        skiprows=lambda x: not keep_row(x),
+        usecols=list(range(expected_cols)),
+    )
+    df.columns = header_names
     for column in df.columns:
         df[column] = pd.to_numeric(df[column], errors="coerce")
     df.interpolate(method="linear", inplace=True, limit_direction="both", axis=0)
@@ -147,6 +148,39 @@ def detect_header_row(lines: list[str], trigger_channel: str, burst_channel: str
     raise ValueError("Unable to auto-detect the LVM header row from channel names.")
 
 
+def detect_header_row_from_file(
+    file_path: Path,
+    trigger_channel: str,
+    burst_channel: str | None,
+    max_scan_lines: int = 300,
+) -> int:
+    wanted = {trigger_channel.strip().lower()}
+    if burst_channel:
+        wanted.add(burst_channel.strip().lower())
+
+    with file_path.open("r", encoding="utf-8", errors="replace") as file_obj:
+        for idx, line in enumerate(file_obj):
+            if idx > max_scan_lines:
+                break
+            if "\t" not in line:
+                continue
+            cols = [c.strip().lower() for c in line.rstrip("\n").split("\t")]
+            if wanted.issubset(set(cols)):
+                return idx
+
+    raise ValueError("Unable to auto-detect the LVM header row from channel names.")
+
+
+def read_prefix_lines(file_path: Path, stop_row: int) -> list[str]:
+    prefix: list[str] = []
+    with file_path.open("r", encoding="utf-8", errors="replace") as file_obj:
+        for idx, line in enumerate(file_obj):
+            if idx > stop_row:
+                break
+            prefix.append(line)
+    return prefix
+
+
 def infer_sample_rate_hz(df: pd.DataFrame) -> float:
     time_candidates = ["Time", "time", "X_Value", "x_value", "Seconds", "seconds"]
     for col in time_candidates:
@@ -229,11 +263,19 @@ def create_lvm_fixture(
     if decimate < 1:
         raise ValueError("--decimate must be >= 1")
 
-    lines = input_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
-    if header_row_index >= len(lines):
-        header_row_index = detect_header_row(
-            lines, trigger_channel=trigger_channel, burst_channel=burst_channel
+    if header_row_index < 0:
+        raise ValueError("--header-row-index must be >= 0")
+
+    try:
+        lines = read_prefix_lines(input_path, stop_row=header_row_index)
+    except FileNotFoundError as exc:
+        raise ValueError(f"Input file not found: {input_path}") from exc
+
+    if len(lines) <= header_row_index:
+        header_row_index = detect_header_row_from_file(
+            input_path, trigger_channel=trigger_channel, burst_channel=burst_channel
         )
+        lines = read_prefix_lines(input_path, stop_row=header_row_index)
 
     try:
         df = read_lvm_data(
@@ -242,19 +284,21 @@ def create_lvm_fixture(
             read_every_n=read_every_n,
         )
     except Exception:
-        auto_idx = detect_header_row(
-            lines, trigger_channel=trigger_channel, burst_channel=burst_channel
+        auto_idx = detect_header_row_from_file(
+            input_path, trigger_channel=trigger_channel, burst_channel=burst_channel
         )
         df = read_lvm_data(input_path, header_row_index=auto_idx, read_every_n=read_every_n)
         header_row_index = auto_idx
+        lines = read_prefix_lines(input_path, stop_row=header_row_index)
     else:
         if trigger_channel not in df.columns:
-            auto_idx = detect_header_row(
-                lines, trigger_channel=trigger_channel, burst_channel=burst_channel
+            auto_idx = detect_header_row_from_file(
+                input_path, trigger_channel=trigger_channel, burst_channel=burst_channel
             )
             if auto_idx != header_row_index:
                 df = read_lvm_data(input_path, header_row_index=auto_idx, read_every_n=read_every_n)
                 header_row_index = auto_idx
+                lines = read_prefix_lines(input_path, stop_row=header_row_index)
 
     detection = pick_trigger_and_burst(
         df,

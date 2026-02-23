@@ -56,6 +56,7 @@ wtt-make-lvm-fixture \
 ### Reader and detection behavior
 
 - Reads LVM data using the same style as your campaign scripts (`header=None`, selected rows via `skiprows`, header loaded separately).
+- Handles occasional variable-width rows (e.g., some data rows with 29 fields while header defines 28) by reading only the header-defined column count, which avoids noisy parser warnings.
 - Supports `--read-every-n` for faster coarse reads on very large files.
 - Interpolates missing numeric values after loading.
 - Detects trigger candidates from `trigger-channel` using rolling-mean + gradient peaks.
