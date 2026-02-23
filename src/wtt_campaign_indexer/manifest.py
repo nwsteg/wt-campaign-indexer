@@ -30,10 +30,14 @@ _CONDITION_UNITS = {
     "J": "1",
 }
 
-_RATE_PATTERNS = (
+_CIHX_RATE_PATTERNS = (
     re.compile(r"AcquisitionFrameRate[^0-9]*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
     re.compile(r"<FrameRate[^>]*>([0-9]+(?:\.[0-9]+)?)</FrameRate>", re.IGNORECASE),
     re.compile(r"recordRate[^0-9]*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+)
+
+_HCC_RATE_PATTERNS = (
+    re.compile(r"(?:frame(?:_|\s*)rate|framerate|fps)[^0-9]*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
 )
 
 _STEADY_STATE_START_MS = 50.0
@@ -44,7 +48,19 @@ _DEFAULT_TUNNEL_MACH = 7.2
 
 def infer_rate_from_cihx(cihx_path: Path) -> float | None:
     text = cihx_path.read_text(encoding="utf-8", errors="replace")
-    for pattern in _RATE_PATTERNS:
+    for pattern in _CIHX_RATE_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+    return None
+
+
+def infer_rate_from_hcc(hcc_path: Path) -> float | None:
+    text = hcc_path.read_text(encoding="utf-8", errors="replace")
+    for pattern in _HCC_RATE_PATTERNS:
         match = pattern.search(text)
         if match:
             try:
@@ -234,16 +250,21 @@ def build_fst_manifest(
     for diagnostic in fst.diagnostics:
         for run in diagnostic.runs:
             cihx_path = run.cihx_files[0] if run.cihx_files else None
+            hcc_path = run.hcc_files[0] if run.hcc_files else None
             notes: list[str] = []
             errors: list[str] = []
             inferred_rate: float | None = None
 
-            if cihx_path is None:
-                errors.append("No .cihx file discovered for run.")
-            else:
+            if cihx_path is not None:
                 inferred_rate = infer_rate_from_cihx(cihx_path)
                 if inferred_rate is None:
                     notes.append("Unable to infer frame rate from .cihx metadata.")
+            elif hcc_path is not None:
+                inferred_rate = infer_rate_from_hcc(hcc_path)
+                if inferred_rate is None:
+                    notes.append("Unable to infer frame rate from .hcc metadata.")
+            else:
+                errors.append("No .cihx or .hcc file discovered for run.")
             if _looks_like_support_run(run.name):
                 notes.append("Support run (scale/cal); not treated as primary flow data.")
 
@@ -253,6 +274,7 @@ def build_fst_manifest(
                         ("run_id", run.name),
                         ("diagnostic", diagnostic.name),
                         ("cihx_path", str(cihx_path) if cihx_path else None),
+                        ("hcc_path", str(hcc_path) if hcc_path else None),
                         ("inferred_rate_hz", inferred_rate),
                         ("is_support_run", _looks_like_support_run(run.name)),
                         ("notes", notes),
@@ -299,6 +321,7 @@ def build_fst_manifest(
                                     ("inferred_rate_hz", "Hz"),
                                     ("run_id", None),
                                     ("cihx_path", None),
+                                    ("hcc_path", None),
                                     ("is_support_run", None),
                                 ]
                             ),
