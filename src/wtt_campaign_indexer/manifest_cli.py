@@ -48,6 +48,19 @@ def _resolve_tunnel_mach(tunnel_mach: float | None) -> float:
     return float(normalized)
 
 
+def _resolve_tunnel_mach(tunnel_mach: float | None) -> float:
+    if tunnel_mach is not None:
+        return tunnel_mach
+
+    if not sys.stdin.isatty():
+        return 7.2
+
+    raw = input("Enter tunnel Mach number for this campaign summary [7.2]: ").strip()
+    if not raw:
+        return 7.2
+    return float(raw)
+
+
 def _resolve_jet_options(
     *,
     jet_used: bool | None,
