@@ -202,3 +202,21 @@ def test_infer_rate_from_hcc_supports_telops_header_fallback(tmp_path: Path):
     hcc.write_bytes(bytes(header) + b"\x00" * 16)
 
     assert infer_rate_from_hcc(hcc) == 3000.0
+
+
+def test_campaign_summary_skips_fst_with_skip_marker(tmp_path: Path):
+    fst_keep = tmp_path / "FST1388"
+    fst_skip = tmp_path / "FST1389"
+    fst_keep.mkdir()
+    fst_skip.mkdir()
+    _touch(fst_keep / "FST_1388.lvm")
+    _touch(fst_keep / "pls" / "run_S0001" / "meta.cihx", "AcquisitionFrameRate = 10000")
+    _touch(fst_skip / "FST_1389.lvm")
+    _touch(fst_skip / "skip.txt")
+
+    summary = build_campaign_summary_markdown(
+        tmp_path, tunnel_mach=7.2, jet_used=True, jet_mach=3.09
+    )
+
+    assert "FST_1388" in summary
+    assert "FST_1389" not in summary

@@ -56,6 +56,8 @@ def discover_campaign(campaign_root: Path) -> CampaignDiscovery:
         normalized = normalize_fst_name(child.name)
         if normalized is None:
             continue
+        if (child / "skip.txt").exists():
+            continue
 
         fst_number = int(normalized.split("_")[1])
         fst_entries.append(
