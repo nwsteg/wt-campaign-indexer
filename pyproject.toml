@@ -8,6 +8,7 @@ dependencies = [
   "matplotlib>=3.8",
   "numpy>=1.26",
   "pandas>=2.1",
+  "pygasflow>=1.4",
 ]
 
 [project.optional-dependencies]

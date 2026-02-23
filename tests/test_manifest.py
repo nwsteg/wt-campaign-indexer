@@ -33,6 +33,9 @@ def test_manifest_required_keys_always_exist(tmp_path: Path):
         "fst_id",
         "lvm_path",
         "lvm_fixture_path",
+        "tunnel_mach",
+        "jet_used",
+        "jet_mach",
         "diagnostics",
         "runs",
         "condition_summary",
@@ -54,8 +57,11 @@ def test_manifest_required_keys_always_exist(tmp_path: Path):
         "Re_1": None,
         "p0j": None,
         "T0j": None,
-        "p0j/p0": None,
+        "pinf": None,
+        "pinf_ref_jet_mach": None,
+        "pj": None,
         "p0j/pinf": None,
+        "pj/pinf": None,
         "J": None,
     }
     assert payload["units"]["condition_summary"]["p0"] == "psia"
@@ -101,13 +107,16 @@ def test_campaign_summary_contains_discovery_overview(tmp_path: Path):
     _touch(fst_dir / "FST_1388.lvm")
     _touch(fst_dir / "pls" / "run_S0001" / "meta.cihx", "AcquisitionFrameRate = 10000")
 
-    summary = build_campaign_summary_markdown(tmp_path)
+    summary = build_campaign_summary_markdown(
+        tmp_path, tunnel_mach=7.2, jet_used=True, jet_mach=3.09
+    )
 
     assert "# Dummy campaign summary" in summary
     assert "## Top-level overview (steady-state, 50-90 ms after burst)" in summary
     assert "| FST_1388 | FST_1388.lvm | 1 | 1 |" in summary
     assert "| pls | yes | 1 |" in summary
     assert "| pls | run_S0001 | no | 10000.000 |" in summary
+    assert "Jet enabled" in summary
 
 
 def test_write_campaign_summary_writes_file(tmp_path: Path):

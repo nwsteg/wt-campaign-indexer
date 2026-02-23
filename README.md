@@ -103,8 +103,13 @@ Point the tool at a campaign root (including `examples/dummy_campaign`) to gener
 ```bash
 wtt-write-campaign-summary \
   --campaign-root examples/dummy_campaign \
-  --summary-output examples/dummy_campaign/campaign_summary.md
+  --summary-output examples/dummy_campaign/campaign_summary.md \
+  --tunnel-mach 7.2 \
+  --jet-used \
+  --jet-mach 3.09
 ```
+
+If `--jet-used`/`--no-jet-used` is omitted and you run in an interactive terminal, the CLI will prompt whether a jet was used and (if yes) ask for jet Mach.
 
 ## Quality checks
 

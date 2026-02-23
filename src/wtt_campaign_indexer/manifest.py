@@ -6,6 +6,9 @@ import re
 from collections import OrderedDict
 from pathlib import Path
 
+from pygasflow.atd.viscosity import viscosity_air_southerland
+from pygasflow.isentropic import pressure_ratio
+
 from wtt_campaign_indexer.discovery import FSTDiscovery, discover_campaign
 from wtt_campaign_indexer.lvm_fixture import (
     infer_sample_rate_hz,
@@ -19,8 +22,11 @@ _CONDITION_UNITS = {
     "Re_1": "1/m",
     "p0j": "psia",
     "T0j": "K",
-    "p0j/p0": "1",
+    "pinf": "psia",
+    "pinf_ref_jet_mach": "psia",
+    "pj": "psia",
     "p0j/pinf": "1",
+    "pj/pinf": "1",
     "J": "1",
 }
 
@@ -32,8 +38,8 @@ _RATE_PATTERNS = (
 
 _STEADY_STATE_START_MS = 50.0
 _STEADY_STATE_END_MS = 90.0
-_PINF_PSIA = 14.7
 _ASSUMED_T0J_K = 300.0
+_DEFAULT_TUNNEL_MACH = 7.2
 
 
 def infer_rate_from_cihx(cihx_path: Path) -> float | None:
@@ -70,23 +76,23 @@ def _select_channel(df, *candidates: str) -> float | None:
     return None
 
 
-def _dynamic_viscosity_sutherland(temp_k: float) -> float:
-    mu_ref = 1.716e-5
-    t_ref = 273.15
-    c = 111.0
-    return mu_ref * (temp_k / t_ref) ** 1.5 * (t_ref + c) / (temp_k + c)
-
-
 def _compute_reynolds_per_meter(p0_psia: float, t0_k: float) -> float:
     p0_pa = p0_psia * 6894.757293168
     gamma = 1.4
     gas_constant = 287.05
-    mu = _dynamic_viscosity_sutherland(t0_k)
+    mu = float(viscosity_air_southerland(t0_k))
     return p0_pa * math.sqrt(gamma / (gas_constant * t0_k)) / mu
+
+
+def _isentropic_static_pressure(p0_psia: float, mach: float) -> float:
+    return p0_psia * float(pressure_ratio(mach))
 
 
 def compute_steady_state_conditions(
     lvm_path: Path,
+    tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
+    jet_used: bool = False,
+    jet_mach: float | None = None,
 ) -> tuple[OrderedDict[str, float | None], list[str]]:
     notes: list[str] = []
     try:
@@ -122,16 +128,30 @@ def compute_steady_state_conditions(
     if p0j is None:
         notes.append("Channel 'LVDT' not found; p0j unavailable.")
 
-    p0j_over_p0 = (p0j / p0) if (p0 and p0j and p0 != 0) else None
-    p0j_over_pinf = (p0j / _PINF_PSIA) if p0j is not None else None
-
     reynolds = None
+    pinf = None
+    pinf_ref_jet_mach = None
     if p0 is not None and t0 is not None and t0 > 0:
         reynolds = _compute_reynolds_per_meter(p0_psia=p0, t0_k=t0)
+        pinf = _isentropic_static_pressure(p0_psia=p0, mach=tunnel_mach)
+        if jet_mach is not None:
+            pinf_ref_jet_mach = _isentropic_static_pressure(p0_psia=p0, mach=jet_mach)
 
+    pj = None
+    p0j_over_pinf = None
+    pj_over_pinf = None
     j_value = None
-    if p0j_over_p0 is not None and t0 is not None and t0j is not None and t0j > 0:
-        j_value = p0j_over_p0 * math.sqrt(t0 / t0j)
+
+    if pinf is not None and p0j is not None and pinf > 0:
+        p0j_over_pinf = p0j / pinf
+
+    if jet_used:
+        if jet_mach is None:
+            notes.append("Jet marked as used but jet_mach missing; pj/pinf and J unavailable.")
+        elif p0j is not None and pinf is not None and pinf > 0:
+            pj = _isentropic_static_pressure(p0_psia=p0j, mach=jet_mach)
+            pj_over_pinf = pj / pinf
+            j_value = pj_over_pinf * (jet_mach / tunnel_mach) ** 2
 
     notes.append(
         "Steady-state window: "
@@ -139,6 +159,11 @@ def compute_steady_state_conditions(
         f"(indices {start_idx}-{end_idx})."
     )
     notes.append(f"T0j assumed constant at {_ASSUMED_T0J_K:.0f} K.")
+    notes.append(f"pinf computed from p0 using isentropic relation at M={tunnel_mach:.3g}.")
+    if jet_mach is not None:
+        notes.append(f"Reference pinf at jet Mach from p0 uses M={jet_mach:.3g}.")
+    if jet_used and jet_mach is not None:
+        notes.append(f"pj computed from p0j using isentropic relation at jet M={jet_mach:.3g}.")
 
     return (
         OrderedDict(
@@ -148,8 +173,11 @@ def compute_steady_state_conditions(
                 ("Re_1", reynolds),
                 ("p0j", p0j),
                 ("T0j", t0j),
-                ("p0j/p0", p0j_over_p0),
+                ("pinf", pinf),
+                ("pinf_ref_jet_mach", pinf_ref_jet_mach),
+                ("pj", pj),
                 ("p0j/pinf", p0j_over_pinf),
+                ("pj/pinf", pj_over_pinf),
                 ("J", j_value),
             ]
         ),
@@ -177,7 +205,12 @@ def find_lvm_fixture_path(fst: FSTDiscovery) -> Path | None:
     return None
 
 
-def build_fst_manifest(fst: FSTDiscovery) -> OrderedDict[str, object]:
+def build_fst_manifest(
+    fst: FSTDiscovery,
+    tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
+    jet_used: bool = False,
+    jet_mach: float | None = None,
+) -> OrderedDict[str, object]:
     diagnostics = [
         OrderedDict(
             [
@@ -224,13 +257,21 @@ def build_fst_manifest(fst: FSTDiscovery) -> OrderedDict[str, object]:
     condition_summary = OrderedDict((key, None) for key in _CONDITION_UNITS)
     condition_notes: list[str] = []
     if fst.primary_lvm:
-        condition_summary, condition_notes = compute_steady_state_conditions(fst.primary_lvm)
+        condition_summary, condition_notes = compute_steady_state_conditions(
+            fst.primary_lvm,
+            tunnel_mach=tunnel_mach,
+            jet_used=jet_used,
+            jet_mach=jet_mach,
+        )
 
     manifest = OrderedDict(
         [
             ("fst_id", fst.normalized_name),
             ("lvm_path", str(fst.primary_lvm) if fst.primary_lvm else None),
             ("lvm_fixture_path", str(fixture_path) if fixture_path else None),
+            ("tunnel_mach", tunnel_mach),
+            ("jet_used", jet_used),
+            ("jet_mach", jet_mach),
             ("diagnostics", diagnostics),
             ("runs", run_entries),
             ("condition_summary", condition_summary),
@@ -262,16 +303,39 @@ def build_fst_manifest(fst: FSTDiscovery) -> OrderedDict[str, object]:
     return manifest
 
 
-def write_fst_manifest(fst: FSTDiscovery) -> Path:
+def write_fst_manifest(
+    fst: FSTDiscovery,
+    tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
+    jet_used: bool = False,
+    jet_mach: float | None = None,
+) -> Path:
     manifest_path = fst.path / f"{fst.normalized_name}_manifest.json"
-    manifest = build_fst_manifest(fst)
+    manifest = build_fst_manifest(
+        fst,
+        tunnel_mach=tunnel_mach,
+        jet_used=jet_used,
+        jet_mach=jet_mach,
+    )
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest_path
 
 
-def write_campaign_manifests(campaign_root: Path) -> tuple[Path, ...]:
+def write_campaign_manifests(
+    campaign_root: Path,
+    tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
+    jet_used: bool = False,
+    jet_mach: float | None = None,
+) -> tuple[Path, ...]:
     discovery = discover_campaign(campaign_root)
-    return tuple(write_fst_manifest(fst) for fst in discovery.fsts)
+    return tuple(
+        write_fst_manifest(
+            fst,
+            tunnel_mach=tunnel_mach,
+            jet_used=jet_used,
+            jet_mach=jet_mach,
+        )
+        for fst in discovery.fsts
+    )
 
 
 def _format_rate_khz(rate_hz: float | None) -> str:
@@ -298,7 +362,12 @@ def _pick_primary_actual_run(
     return None
 
 
-def build_campaign_summary_markdown(campaign_root: Path) -> str:
+def build_campaign_summary_markdown(
+    campaign_root: Path,
+    tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
+    jet_used: bool = False,
+    jet_mach: float | None = None,
+) -> str:
     discovery = discover_campaign(campaign_root)
     lines: list[str] = []
     lines.append("# Dummy campaign summary")
@@ -309,12 +378,17 @@ def build_campaign_summary_markdown(campaign_root: Path) -> str:
     lines.append("")
     lines.append(
         "| FST | Diagnostic | Rate (kHz) | p0 (psia) | T0 (K) | Re_1 x 10^-6 (1/m) | "
-        "p0j (psia) | T0j (K) | p0j/p0 | p0j/pinf | J |"
+        "p0j (psia) | T0j (K) | p0j/pinf | pj/pinf | J |"
     )
     lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
 
     for fst in discovery.fsts:
-        manifest = build_fst_manifest(fst)
+        manifest = build_fst_manifest(
+            fst,
+            tunnel_mach=tunnel_mach,
+            jet_used=jet_used,
+            jet_mach=jet_mach,
+        )
         summary = manifest["condition_summary"]
 
         if manifest["diagnostics"]:
@@ -335,8 +409,8 @@ def build_campaign_summary_markdown(campaign_root: Path) -> str:
                     _format_numeric(reynolds_millions, 2),
                     _format_numeric(summary["p0j"], 1),
                     _format_numeric(summary["T0j"], 1),
-                    _format_numeric(summary["p0j/p0"], 2),
-                    _format_numeric(summary["p0j/pinf"], 1),
+                    _format_numeric(summary["p0j/pinf"], 2),
+                    _format_numeric(summary["pj/pinf"], 2),
                     _format_numeric(summary["J"], 2),
                 ]
                 lines.append("| " + " | ".join(row) + " |")
@@ -348,6 +422,16 @@ def build_campaign_summary_markdown(campaign_root: Path) -> str:
     lines.append(
         "- Top-level values are computed from each FST LVM in the 50-90 ms " "post-burst window."
     )
+    lines.append(
+        f"- pinf is computed from p0 using isentropic relations with tunnel M={tunnel_mach:.3g}."
+    )
+    if jet_used and jet_mach is not None:
+        lines.append(
+            "- Jet enabled: pj and J are computed using isentropic relations "
+            f"with jet M={jet_mach:.3g}."
+        )
+    else:
+        lines.append("- Jet disabled: pj/pinf and J are omitted.")
     lines.append(
         "- Runs containing `scale` or `cal` in their IDs are marked as support runs "
         "in detailed sections and excluded when picking a primary rate for the "
@@ -369,7 +453,12 @@ def build_campaign_summary_markdown(campaign_root: Path) -> str:
         )
 
     for fst in discovery.fsts:
-        manifest = build_fst_manifest(fst)
+        manifest = build_fst_manifest(
+            fst,
+            tunnel_mach=tunnel_mach,
+            jet_used=jet_used,
+            jet_mach=jet_mach,
+        )
         lines.append("")
         lines.append(f"## {fst.normalized_name}")
         lines.append("")
@@ -409,8 +498,22 @@ def build_campaign_summary_markdown(campaign_root: Path) -> str:
     return "\n".join(lines)
 
 
-def write_campaign_summary(campaign_root: Path, output_path: Path) -> Path:
+def write_campaign_summary(
+    campaign_root: Path,
+    output_path: Path,
+    tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
+    jet_used: bool = False,
+    jet_mach: float | None = None,
+) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(build_campaign_summary_markdown(campaign_root), encoding="utf-8")
+    output_path.write_text(
+        build_campaign_summary_markdown(
+            campaign_root,
+            tunnel_mach=tunnel_mach,
+            jet_used=jet_used,
+            jet_mach=jet_mach,
+        ),
+        encoding="utf-8",
+    )
     return output_path

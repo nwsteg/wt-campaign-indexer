@@ -2,6 +2,9 @@
   "fst_id": "FST_1391",
   "lvm_path": "examples/dummy_campaign/FST1391/FST_1391.lvm",
   "lvm_fixture_path": null,
+  "tunnel_mach": 7.2,
+  "jet_used": true,
+  "jet_mach": 3.09,
   "diagnostics": [
     {
       "name": "piv",
@@ -59,16 +62,22 @@
   "condition_summary": {
     "p0": 418.6696529303482,
     "T0": 298.92343433808554,
-    "Re_1": 633347723.5741055,
+    "Re_1": 633380759.419361,
     "p0j": 105.03094549751245,
     "T0j": 300.0,
-    "p0j/p0": 0.25086830335655086,
-    "p0j/pinf": 7.1449622787423435,
-    "J": 0.25041777180252417
+    "pinf": 0.0845234577486396,
+    "pinf_ref_jet_mach": 9.964247948314352,
+    "pj": 2.499713977017614,
+    "p0j/pinf": 1242.6248084864098,
+    "pj/pinf": 29.574203938170605,
+    "J": 5.447095999653679
   },
   "condition_notes": [
     "Steady-state window: 50-90 ms after burst (indices 738-938).",
-    "T0j assumed constant at 300 K."
+    "T0j assumed constant at 300 K.",
+    "pinf computed from p0 using isentropic relation at M=7.2.",
+    "Reference pinf at jet Mach from p0 uses M=3.09.",
+    "pj computed from p0j using isentropic relation at jet M=3.09."
   ],
   "units": {
     "condition_summary": {
@@ -77,8 +86,11 @@
       "Re_1": "1/m",
       "p0j": "psia",
       "T0j": "K",
-      "p0j/p0": "1",
+      "pinf": "psia",
+      "pinf_ref_jet_mach": "psia",
+      "pj": "psia",
       "p0j/pinf": "1",
+      "pj/pinf": "1",
       "J": "1"
     },
     "runs": {

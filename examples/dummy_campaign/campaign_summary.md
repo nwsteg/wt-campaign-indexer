@@ -4,14 +4,16 @@ Campaign root: `examples/dummy_campaign`
 
 ## Top-level overview (steady-state, 50-90 ms after burst)
 
-| FST | Diagnostic | Rate (kHz) | p0 (psia) | T0 (K) | Re_1 x 10^-6 (1/m) | p0j (psia) | T0j (K) | p0j/p0 | p0j/pinf | J |
+| FST | Diagnostic | Rate (kHz) | p0 (psia) | T0 (K) | Re_1 x 10^-6 (1/m) | p0j (psia) | T0j (K) | p0j/pinf | pj/pinf | J |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| FST_1388 | pls | 100.000 | 415.6 | 300.4 | 624.90 | 88.8 | 300.0 | 0.21 | 6.0 | 0.21 |
-| FST_1391 | piv | 100.000 | 418.7 | 298.9 | 633.35 | 105.0 | 300.0 | 0.25 | 7.1 | 0.25 |
-| FST_1391 | shift | 10.000 | 418.7 | 298.9 | 633.35 | 105.0 | 300.0 | 0.25 | 7.1 | 0.25 |
+| FST_1388 | pls | 100.000 | 415.6 | 300.4 | 624.93 | 88.8 | 300.0 | 1058.62 | 25.19 | 4.64 |
+| FST_1391 | piv | 100.000 | 418.7 | 298.9 | 633.38 | 105.0 | 300.0 | 1242.62 | 29.57 | 5.45 |
+| FST_1391 | shift | 10.000 | 418.7 | 298.9 | 633.38 | 105.0 | 300.0 | 1242.62 | 29.57 | 5.45 |
 
 Notes:
 - Top-level values are computed from each FST LVM in the 50-90 ms post-burst window.
+- pinf is computed from p0 using isentropic relations with tunnel M=7.2.
+- Jet enabled: pj and J are computed using isentropic relations with jet M=3.09.
 - Runs containing `scale` or `cal` in their IDs are marked as support runs in detailed sections and excluded when picking a primary rate for the overview table.
 
 FST count: **2**
@@ -29,6 +31,9 @@ FST count: **2**
 
 - Steady-state window: 50-90 ms after burst (indices 744-944).
 - T0j assumed constant at 300 K.
+- pinf computed from p0 using isentropic relation at M=7.2.
+- Reference pinf at jet Mach from p0 uses M=3.09.
+- pj computed from p0j using isentropic relation at jet M=3.09.
 
 ### Diagnostics
 
@@ -49,6 +54,9 @@ FST count: **2**
 
 - Steady-state window: 50-90 ms after burst (indices 738-938).
 - T0j assumed constant at 300 K.
+- pinf computed from p0 using isentropic relation at M=7.2.
+- Reference pinf at jet Mach from p0 uses M=3.09.
+- pj computed from p0j using isentropic relation at jet M=3.09.
 
 ### Diagnostics
 
