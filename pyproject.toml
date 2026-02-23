@@ -5,6 +5,7 @@ description = "Tooling for creating wind tunnel campaign fixtures and indexes"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "matplotlib>=3.8",
   "numpy>=1.26",
   "pandas>=2.1",
 ]
