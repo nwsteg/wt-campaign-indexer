@@ -120,7 +120,7 @@ wtt-plot-lvm-fixture \
 
 ## CLI: write campaign manifests + summary
 
-Point the tool at a campaign root (including `examples/dummy_campaign`) to generate one manifest per FST plus a markdown health-check summary.
+Point the tool at a campaign root (including `examples/dummy_campaign`) to generate one manifest per FST plus a markdown health-check summary. By default, the summary is written to `campaign_summary.md` inside that campaign root.
 
 ```bash
 wtt-write-campaign-summary examples/dummy_campaign

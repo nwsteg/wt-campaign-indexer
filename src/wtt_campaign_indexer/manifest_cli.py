@@ -48,19 +48,6 @@ def _resolve_tunnel_mach(tunnel_mach: float | None) -> float:
     return float(normalized)
 
 
-def _resolve_tunnel_mach(tunnel_mach: float | None) -> float:
-    if tunnel_mach is not None:
-        return tunnel_mach
-
-    if not sys.stdin.isatty():
-        return 7.2
-
-    raw = input("Enter tunnel Mach number for this campaign summary [7.2]: ").strip()
-    if not raw:
-        return 7.2
-    return float(raw)
-
-
 def _resolve_jet_options(
     *,
     jet_used: bool | None,
@@ -87,6 +74,12 @@ def _resolve_jet_options(
     return True, float(normalized)
 
 
+def _resolve_summary_output(campaign_root: Path, summary_output: Path | None) -> Path:
+    if summary_output is not None:
+        return summary_output
+    return campaign_root / "campaign_summary.md"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Write campaign manifest files and a campaign summary markdown report"
@@ -101,8 +94,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--summary-output",
         type=Path,
-        default=Path("campaign_summary.md"),
-        help="Path to markdown summary output file",
+        default=None,
+        help=(
+            "Path to markdown summary output file "
+            "(defaults to <campaign_root>/campaign_summary.md)"
+        ),
     )
     parser.add_argument(
         "--tunnel-mach",
@@ -133,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    summary_output = _resolve_summary_output(args.campaign_root, args.summary_output)
     tunnel_mach = _resolve_tunnel_mach(args.tunnel_mach)
     jet_used, jet_mach = _resolve_jet_options(jet_used=args.jet_used, jet_mach=args.jet_mach)
 
@@ -147,7 +144,7 @@ def main() -> None:
     print("Starting campaign summary generation...", flush=True)
     summary_path = write_campaign_summary(
         args.campaign_root,
-        args.summary_output,
+        summary_output,
         tunnel_mach=tunnel_mach,
         jet_used=jet_used,
         jet_mach=jet_mach,

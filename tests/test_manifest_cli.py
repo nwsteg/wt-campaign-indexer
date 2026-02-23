@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import pytest
 
 from wtt_campaign_indexer.manifest_cli import (
     _resolve_jet_options,
+    _resolve_summary_output,
     _resolve_tunnel_mach,
     build_parser,
 )
@@ -56,3 +59,16 @@ def test_resolve_jet_options_prompts_when_unspecified(monkeypatch: pytest.Monkey
 
     assert jet_used is True
     assert jet_mach == 3.09
+
+
+def test_resolve_summary_output_defaults_to_campaign_root() -> None:
+    campaign_root = Path("/tmp/campaign")
+
+    assert _resolve_summary_output(campaign_root, None) == campaign_root / "campaign_summary.md"
+
+
+def test_resolve_summary_output_respects_explicit_path() -> None:
+    campaign_root = Path("/tmp/campaign")
+    explicit = Path("custom/output.md")
+
+    assert _resolve_summary_output(campaign_root, explicit) == explicit
