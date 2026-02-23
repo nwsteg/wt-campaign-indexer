@@ -515,6 +515,8 @@ def write_campaign_manifests(
     jet_mach: float | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[Path, ...]:
+    if progress_callback is not None:
+        progress_callback("Discovering campaign folders...")
     discovery = discover_campaign(campaign_root)
     manifest_paths: list[Path] = []
     for fst in discovery.fsts:
@@ -562,6 +564,8 @@ def build_campaign_summary_markdown(
     jet_mach: float | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> str:
+    if progress_callback is not None:
+        progress_callback("Discovering campaign folders...")
     discovery = discover_campaign(campaign_root)
     lines: list[str] = []
     lines.append("# Dummy campaign summary")
