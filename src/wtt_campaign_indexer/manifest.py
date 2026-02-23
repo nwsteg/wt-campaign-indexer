@@ -4,6 +4,7 @@ import importlib
 import json
 import math
 import re
+import struct
 from collections import OrderedDict
 from pathlib import Path
 
@@ -183,12 +184,46 @@ def _infer_rate_from_imageio(hcc_path: Path) -> float | None:
 
 
 def infer_rate_from_hcc(hcc_path: Path) -> float | None:
-    """Infer HCC frame rate using binary-capable readers (no text/regex parsing)."""
-    for parser in (_infer_rate_from_telops_hcc, _infer_rate_from_av, _infer_rate_from_imageio):
+    """Infer HCC frame rate from available readers, then a Telops header fallback."""
+    for parser in (
+        _infer_rate_from_telops_hcc,
+        _infer_rate_from_av,
+        _infer_rate_from_imageio,
+        _infer_rate_from_telops_header,
+    ):
         rate = parser(hcc_path)
         if rate is not None:
             return rate
     return None
+
+
+def _infer_rate_from_telops_header(hcc_path: Path) -> float | None:
+    """Fallback for Telops HCC files when optional reader deps are unavailable.
+
+    The dummy campaign Telops fixtures store acquisition frequency in milli-Hz at
+    offset 44. Some files also include an integer at offset 76, but in practice
+    that value may represent another field, so the milli-Hz header value is
+    preferred when available.
+    """
+    try:
+        with hcc_path.open("rb") as handle:
+            header = handle.read(80)
+    except OSError:
+        return None
+
+    if len(header) < 80 or not header.startswith(b"TC\x02\r"):
+        return None
+
+    milli_hz_rate = _to_positive_float(struct.unpack_from("<I", header, 44)[0])
+    if milli_hz_rate is not None:
+        rate_hz = milli_hz_rate / 1000.0
+        if 0 < rate_hz <= 1_000_000:
+            return rate_hz
+
+    fallback_rate = _to_positive_float(struct.unpack_from("<I", header, 76)[0])
+    if fallback_rate is None or fallback_rate > 1_000_000:
+        return None
+    return fallback_rate
 
 
 def _looks_like_support_run(run_id: str) -> bool:

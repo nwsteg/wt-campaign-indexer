@@ -191,3 +191,14 @@ def test_manifest_prefers_hcc_when_cihx_missing(tmp_path: Path, monkeypatch):
     assert payload["runs"][0]["cihx_path"] is None
     assert payload["runs"][0]["hcc_path"].endswith("run_S0001.hcc")
     assert payload["runs"][0]["inferred_rate_hz"] == 355.0
+
+
+def test_infer_rate_from_hcc_supports_telops_header_fallback(tmp_path: Path):
+    hcc = tmp_path / "meta.hcc"
+    header = bytearray(80)
+    header[:4] = b"TC\x02\r"
+    header[44:48] = (3_000_000).to_bytes(4, "little")
+    header[76:80] = (1500).to_bytes(4, "little")
+    hcc.write_bytes(bytes(header) + b"\x00" * 16)
+
+    assert infer_rate_from_hcc(hcc) == 3000.0

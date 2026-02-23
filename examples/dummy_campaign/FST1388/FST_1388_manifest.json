@@ -17,6 +17,7 @@
       "run_id": "run_S0001",
       "diagnostic": "pls",
       "cihx_path": "examples/dummy_campaign/FST1388/pls/run_S0001/run_S0001.cihx",
+      "hcc_path": null,
       "inferred_rate_hz": 100000.0,
       "is_support_run": false,
       "notes": [],
@@ -26,6 +27,7 @@
       "run_id": "scale_S0001",
       "diagnostic": "pls",
       "cihx_path": "examples/dummy_campaign/FST1388/pls/scale_S0001/scale_S0001.cihx",
+      "hcc_path": null,
       "inferred_rate_hz": 50.0,
       "is_support_run": true,
       "notes": [
@@ -72,6 +74,7 @@
       "inferred_rate_hz": "Hz",
       "run_id": null,
       "cihx_path": null,
+      "hcc_path": null,
       "is_support_run": null
     }
   }
