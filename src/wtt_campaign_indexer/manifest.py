@@ -7,7 +7,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from pygasflow.atd.viscosity import viscosity_air_southerland
-from pygasflow.isentropic import pressure_ratio
+from pygasflow.isentropic import pressure_ratio, temperature_ratio
 
 from wtt_campaign_indexer.discovery import FSTDiscovery, discover_campaign
 from wtt_campaign_indexer.lvm_fixture import (
@@ -76,12 +76,20 @@ def _select_channel(df, *candidates: str) -> float | None:
     return None
 
 
-def _compute_reynolds_per_meter(p0_psia: float, t0_k: float) -> float:
+def _compute_reynolds_per_meter(p0_psia: float, t0_k: float, mach: float) -> float:
     p0_pa = p0_psia * 6894.757293168
     gamma = 1.4
     gas_constant = 287.05
-    mu = float(viscosity_air_southerland(t0_k))
-    return p0_pa * math.sqrt(gamma / (gas_constant * t0_k)) / mu
+
+    p_static = p0_pa * float(pressure_ratio(mach))
+    t_static = t0_k * float(temperature_ratio(mach))
+
+    rho_static = p_static / (gas_constant * t_static)
+    a_static = math.sqrt(gamma * gas_constant * t_static)
+    u_static = mach * a_static
+    mu_static = float(viscosity_air_southerland(t_static))
+
+    return rho_static * u_static / mu_static
 
 
 def _isentropic_static_pressure(p0_psia: float, mach: float) -> float:
@@ -132,7 +140,7 @@ def compute_steady_state_conditions(
     pinf = None
     pinf_ref_jet_mach = None
     if p0 is not None and t0 is not None and t0 > 0:
-        reynolds = _compute_reynolds_per_meter(p0_psia=p0, t0_k=t0)
+        reynolds = _compute_reynolds_per_meter(p0_psia=p0, t0_k=t0, mach=tunnel_mach)
         pinf = _isentropic_static_pressure(p0_psia=p0, mach=tunnel_mach)
         if jet_mach is not None:
             pinf_ref_jet_mach = _isentropic_static_pressure(p0_psia=p0, mach=jet_mach)
@@ -377,7 +385,7 @@ def build_campaign_summary_markdown(
     lines.append("## Top-level overview (steady-state, 50-90 ms after burst)")
     lines.append("")
     lines.append(
-        "| FST | Diagnostic | Rate (kHz) | p0 (psia) | T0 (K) | Re_1 x 10^-6 (1/m) | "
+        "| FST | Diagnostic | Rate (kHz) | p0 (psia) | T0 (K) | Re/m x 10^-6 (1/m) | "
         "p0j (psia) | T0j (K) | p0j/pinf | pj/pinf | J |"
     )
     lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
@@ -424,6 +432,10 @@ def build_campaign_summary_markdown(
     )
     lines.append(
         f"- pinf is computed from p0 using isentropic relations with tunnel M={tunnel_mach:.3g}."
+    )
+    lines.append(
+        "- Re/m is computed from static freestream state derived from p0/T0 "
+        f"at tunnel M={tunnel_mach:.3g}."
     )
     if jet_used and jet_mach is not None:
         lines.append(
