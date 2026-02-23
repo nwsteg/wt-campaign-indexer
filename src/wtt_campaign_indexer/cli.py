@@ -27,6 +27,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--read-every-n", type=int, default=1)
     parser.add_argument("--rolling-trigger", type=int, default=6)
     parser.add_argument("--rolling-burst", type=int, default=100)
+    parser.add_argument(
+        "--window-anchor",
+        choices=["trigger", "failed-burst-drop"],
+        default="trigger",
+        help="Anchor window on detected trigger (default) or plenum drop for failed-burst snippets",
+    )
+    parser.add_argument(
+        "--failed-burst-trigger-guard-ms",
+        type=float,
+        default=50.0,
+        help=(
+            "For failed-burst mode, require no trigger candidate within this many ms "
+            "of plenum drop"
+        ),
+    )
     parser.add_argument("--write-metadata-json", type=Path, default=None)
     parser.add_argument(
         "--plot-output",
@@ -57,6 +72,8 @@ def main() -> None:
         read_every_n=args.read_every_n,
         rolling_trigger=args.rolling_trigger,
         rolling_burst=args.rolling_burst,
+        window_anchor=args.window_anchor,
+        failed_burst_trigger_guard_ms=args.failed_burst_trigger_guard_ms,
         metadata_json_path=args.write_metadata_json,
         plot_output_path=args.plot_output,
         plot_plenum_channel=args.plot_plenum_channel,
