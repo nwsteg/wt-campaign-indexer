@@ -145,7 +145,8 @@ def test_failed_burst_drop_window_anchor(tmp_path: Path):
         fs_hz=fs_hz,
         decimate=1,
         window_anchor="failed-burst-drop",
-        failed_burst_trigger_guard_ms=50.0,
+        failed_burst_min_rise_to_drop_ms=500.0,
+        failed_burst_min_drop_to_rise_grad_ratio=0.5,
         rolling_trigger=5,
         rolling_burst=31,
     )

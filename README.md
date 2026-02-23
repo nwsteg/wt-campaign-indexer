@@ -56,7 +56,7 @@ wtt-make-lvm-fixture \
   --write-metadata-json examples/dummy_campaign/FST1391/FST_1391_fixture.json
 ```
 
-Failed-burst fixture example (anchor around plenum decrease and require no nearby trigger):
+Failed-burst fixture example (anchor around plenum decrease with slow-rise/quick-fall check):
 
 ```bash
 wtt-make-lvm-fixture \
@@ -65,7 +65,8 @@ wtt-make-lvm-fixture \
   --trigger-channel Voltage \
   --burst-channel PLEN-PT \
   --window-anchor failed-burst-drop \
-  --failed-burst-trigger-guard-ms 50 \
+  --failed-burst-min-rise-to-drop-ms 500 \
+  --failed-burst-min-drop-to-rise-grad-ratio 0.5 \
   --decimate 1 \
   --pre-ms 5000 \
   --post-ms 5000
@@ -80,7 +81,7 @@ wtt-make-lvm-fixture \
 - Detects trigger candidates from `trigger-channel` using rolling-mean + gradient peaks.
 - Detects burst index from `burst-channel` using rolling-mean + gradient argmax.
 - If several trigger candidates are strong, chooses the one nearest burst.
-- Supports failed-burst snippets via `--window-anchor failed-burst-drop`, which anchors around the plenum-pressure decrease and rejects windows that have trigger candidates within a configurable guard window (`--failed-burst-trigger-guard-ms`, default 50 ms).
+- Supports failed-burst snippets via `--window-anchor failed-burst-drop`, which anchors around the plenum-pressure decrease and checks for a slow rise followed by a quick fall using configurable thresholds (`--failed-burst-min-rise-to-drop-ms`, `--failed-burst-min-drop-to-rise-grad-ratio`).
 - For failed-burst snippets, prefer `--decimate 1` to avoid missing short trigger-like gradients.
 
 
@@ -130,6 +131,8 @@ wtt-write-campaign-summary \
 ```
 
 If `--jet-used`/`--no-jet-used` is omitted and you run in an interactive terminal, the CLI will prompt whether a jet was used and (if yes) ask for jet Mach.
+
+To skip an FST folder from manifest/summary generation, add a `skip.txt` file in that FST folder root (for example: `FST1391/skip.txt`).
 
 ## Quality checks
 

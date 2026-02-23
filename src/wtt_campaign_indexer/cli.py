@@ -34,13 +34,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Anchor window on detected trigger (default) or plenum drop for failed-burst snippets",
     )
     parser.add_argument(
-        "--failed-burst-trigger-guard-ms",
+        "--failed-burst-min-rise-to-drop-ms",
         type=float,
-        default=50.0,
-        help=(
-            "For failed-burst mode, require no trigger candidate within this many ms "
-            "of plenum drop"
-        ),
+        default=500.0,
+        help="For failed-burst mode, minimum time between rise and drop events (ms)",
+    )
+    parser.add_argument(
+        "--failed-burst-min-drop-to-rise-grad-ratio",
+        type=float,
+        default=0.5,
+        help="For failed-burst mode, minimum |drop_grad| / rise_grad ratio",
     )
     parser.add_argument("--write-metadata-json", type=Path, default=None)
     parser.add_argument(
@@ -73,7 +76,8 @@ def main() -> None:
         rolling_trigger=args.rolling_trigger,
         rolling_burst=args.rolling_burst,
         window_anchor=args.window_anchor,
-        failed_burst_trigger_guard_ms=args.failed_burst_trigger_guard_ms,
+        failed_burst_min_rise_to_drop_ms=args.failed_burst_min_rise_to_drop_ms,
+        failed_burst_min_drop_to_rise_grad_ratio=args.failed_burst_min_drop_to_rise_grad_ratio,
         metadata_json_path=args.write_metadata_json,
         plot_output_path=args.plot_output,
         plot_plenum_channel=args.plot_plenum_channel,
