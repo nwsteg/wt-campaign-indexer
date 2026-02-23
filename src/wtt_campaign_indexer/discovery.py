@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-KNOWN_DIAGNOSTICS = ("schlieren", "plif", "pls", "tracking", "piv", "kulite")
+KNOWN_DIAGNOSTICS = ("schlieren", "plif", "pls", "tracking", "piv", "kulite", "ir")
 _FST_PATTERN = re.compile(r"^FST_?(\d+)$", re.IGNORECASE)
 
 
@@ -13,6 +13,7 @@ class RunDiscovery:
     name: str
     path: Path
     cihx_files: tuple[Path, ...]
+    hcc_files: tuple[Path, ...]
 
 
 @dataclass(frozen=True)
@@ -121,11 +122,20 @@ def _discover_runs(diagnostic_dir: Path) -> tuple[RunDiscovery, ...]:
                 if candidate.is_file() and candidate.suffix.lower() == ".cihx"
             )
         )
-        if not cihx_files:
+        hcc_files = tuple(
+            sorted(
+                candidate
+                for candidate in child.iterdir()
+                if candidate.is_file() and candidate.suffix.lower() == ".hcc"
+            )
+        )
+        if not cihx_files and not hcc_files:
             continue
 
         run_name = str(child.relative_to(diagnostic_dir))
-        runs.append(RunDiscovery(name=run_name, path=child, cihx_files=cihx_files))
+        runs.append(
+            RunDiscovery(name=run_name, path=child, cihx_files=cihx_files, hcc_files=hcc_files)
+        )
 
     runs.sort(key=lambda run: run.name)
     return tuple(runs)

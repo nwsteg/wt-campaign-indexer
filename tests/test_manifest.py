@@ -5,6 +5,7 @@ from wtt_campaign_indexer.discovery import discover_campaign
 from wtt_campaign_indexer.manifest import (
     build_campaign_summary_markdown,
     infer_rate_from_cihx,
+    infer_rate_from_hcc,
     write_campaign_summary,
     write_fst_manifest,
 )
@@ -137,3 +138,25 @@ def test_infer_rate_supports_record_rate_pattern(tmp_path: Path):
     cihx.write_text("recordRate=20000", encoding="utf-8")
 
     assert infer_rate_from_cihx(cihx) == 20000.0
+
+
+def test_infer_rate_from_hcc_fps_pattern(tmp_path: Path):
+    hcc = tmp_path / "meta.hcc"
+    hcc.write_text("FrameRate=180", encoding="utf-8")
+
+    assert infer_rate_from_hcc(hcc) == 180.0
+
+
+def test_manifest_prefers_hcc_when_cihx_missing(tmp_path: Path):
+    fst_dir = tmp_path / "FST1402"
+    fst_dir.mkdir()
+    _touch(fst_dir / "FST_1402.lvm")
+    _touch(fst_dir / "ir" / "run_S0001" / "run_S0001.hcc", "fps: 355")
+
+    fst = discover_campaign(tmp_path).fsts[0]
+    manifest_path = write_fst_manifest(fst)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert payload["runs"][0]["cihx_path"] is None
+    assert payload["runs"][0]["hcc_path"].endswith("run_S0001.hcc")
+    assert payload["runs"][0]["inferred_rate_hz"] == 355.0
