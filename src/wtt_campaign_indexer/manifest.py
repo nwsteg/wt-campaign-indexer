@@ -7,6 +7,7 @@ import re
 import struct
 from collections import OrderedDict
 from pathlib import Path
+from typing import Callable
 
 from pygasflow.atd.viscosity import viscosity_air_southerland
 from pygasflow.isentropic import pressure_ratio, temperature_ratio
@@ -512,17 +513,24 @@ def write_campaign_manifests(
     tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
     jet_used: bool = False,
     jet_mach: float | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[Path, ...]:
+    if progress_callback is not None:
+        progress_callback("Discovering campaign folders...")
     discovery = discover_campaign(campaign_root)
-    return tuple(
-        write_fst_manifest(
-            fst,
-            tunnel_mach=tunnel_mach,
-            jet_used=jet_used,
-            jet_mach=jet_mach,
+    manifest_paths: list[Path] = []
+    for fst in discovery.fsts:
+        if progress_callback is not None:
+            progress_callback(f"Processing {fst.normalized_name}...")
+        manifest_paths.append(
+            write_fst_manifest(
+                fst,
+                tunnel_mach=tunnel_mach,
+                jet_used=jet_used,
+                jet_mach=jet_mach,
+            )
         )
-        for fst in discovery.fsts
-    )
+    return tuple(manifest_paths)
 
 
 def _format_rate_khz(rate_hz: float | None) -> str:
@@ -554,7 +562,10 @@ def build_campaign_summary_markdown(
     tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
     jet_used: bool = False,
     jet_mach: float | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> str:
+    if progress_callback is not None:
+        progress_callback("Discovering campaign folders...")
     discovery = discover_campaign(campaign_root)
     lines: list[str] = []
     lines.append("# Dummy campaign summary")
@@ -569,13 +580,17 @@ def build_campaign_summary_markdown(
     )
     lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
 
+    manifests_by_fst: dict[str, OrderedDict[str, object]] = {}
     for fst in discovery.fsts:
+        if progress_callback is not None:
+            progress_callback(f"Processing {fst.normalized_name}...")
         manifest = build_fst_manifest(
             fst,
             tunnel_mach=tunnel_mach,
             jet_used=jet_used,
             jet_mach=jet_mach,
         )
+        manifests_by_fst[fst.normalized_name] = manifest
         summary = manifest["condition_summary"]
 
         if manifest["diagnostics"]:
@@ -644,12 +659,7 @@ def build_campaign_summary_markdown(
         )
 
     for fst in discovery.fsts:
-        manifest = build_fst_manifest(
-            fst,
-            tunnel_mach=tunnel_mach,
-            jet_used=jet_used,
-            jet_mach=jet_mach,
-        )
+        manifest = manifests_by_fst[fst.normalized_name]
         lines.append("")
         lines.append(f"## {fst.normalized_name}")
         lines.append("")
@@ -695,6 +705,7 @@ def write_campaign_summary(
     tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
     jet_used: bool = False,
     jet_mach: float | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> Path:
     output_path = Path(output_path)
     markdown = build_campaign_summary_markdown(
@@ -702,6 +713,7 @@ def write_campaign_summary(
         tunnel_mach=tunnel_mach,
         jet_used=jet_used,
         jet_mach=jet_mach,
+        progress_callback=progress_callback,
     )
     output_path.write_text(markdown, encoding="utf-8")
     return output_path

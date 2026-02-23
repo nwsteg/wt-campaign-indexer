@@ -1,0 +1,96 @@
+{
+  "fst_id": "FST_0870",
+  "lvm_path": "examples/dummy_campaign/FST870/FST_870.lvm",
+  "lvm_fixture_path": null,
+  "tunnel_mach": 7.2,
+  "jet_used": true,
+  "jet_mach": 3.09,
+  "diagnostics": [
+    {
+      "name": "ir",
+      "is_known": true,
+      "run_count": 2
+    },
+    {
+      "name": "schlieren",
+      "is_known": true,
+      "run_count": 1
+    }
+  ],
+  "runs": [
+    {
+      "run_id": "run",
+      "diagnostic": "ir",
+      "cihx_path": null,
+      "hcc_path": "examples/dummy_campaign/FST870/ir/run/run.hcc",
+      "inferred_rate_hz": 4000.0,
+      "is_support_run": false,
+      "notes": [],
+      "errors": []
+    },
+    {
+      "run_id": "scale",
+      "diagnostic": "ir",
+      "cihx_path": null,
+      "hcc_path": "examples/dummy_campaign/FST870/ir/scale/scale.hcc",
+      "inferred_rate_hz": 4000.0,
+      "is_support_run": true,
+      "notes": [
+        "Support run (scale/cal); not treated as primary flow data."
+      ],
+      "errors": []
+    },
+    {
+      "run_id": "run_S0001",
+      "diagnostic": "schlieren",
+      "cihx_path": "examples/dummy_campaign/FST870/schlieren/run_S0001/run_S0001.cihx",
+      "hcc_path": null,
+      "inferred_rate_hz": 40000.0,
+      "is_support_run": false,
+      "notes": [],
+      "errors": []
+    }
+  ],
+  "condition_summary": {
+    "p0": 317.10314540298504,
+    "T0": 301.9079540000001,
+    "Re_1": 29559085.91818634,
+    "p0j": 56.10667236318408,
+    "T0j": 300.0,
+    "pinf": 0.06401862213999288,
+    "pinf_ref_jet_mach": 7.546986851973679,
+    "pj": 1.3353267691332058,
+    "p0j/pinf": 876.4117453276748,
+    "pj/pinf": 20.85841157613759,
+    "J": 3.8417862571396473
+  },
+  "condition_notes": [
+    "Steady-state window: 50-90 ms after burst (indices 741-941).",
+    "T0j assumed constant at 300 K.",
+    "pinf computed from p0 using isentropic relation at M=7.2.",
+    "Reference pinf at jet Mach from p0 uses M=3.09.",
+    "pj computed from p0j using isentropic relation at jet M=3.09."
+  ],
+  "units": {
+    "condition_summary": {
+      "p0": "psia",
+      "T0": "K",
+      "Re_1": "1/m",
+      "p0j": "psia",
+      "T0j": "K",
+      "pinf": "psia",
+      "pinf_ref_jet_mach": "psia",
+      "pj": "psia",
+      "p0j/pinf": "1",
+      "pj/pinf": "1",
+      "J": "1"
+    },
+    "runs": {
+      "inferred_rate_hz": "Hz",
+      "run_id": null,
+      "cihx_path": null,
+      "hcc_path": null,
+      "is_support_run": null
+    }
+  }
+}

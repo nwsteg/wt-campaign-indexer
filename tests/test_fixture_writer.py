@@ -100,3 +100,61 @@ def test_plot_existing_shortened_lvm(tmp_path: Path):
     )
 
     assert plot_path.exists()
+
+
+def test_failed_burst_drop_window_anchor(tmp_path: Path):
+    src = tmp_path / "failed_case.lvm"
+    out_path = tmp_path / "failed_case_fixture.lvm"
+
+    rows = [
+        "LabVIEW Measurement\n",
+        "Writer_Version\t2\n",
+        "Separator\tTab\n",
+        "Time\tVoltage\tPLEN-PT\tOther\n",
+    ]
+
+    fs_hz = 100.0
+    n = 2000
+    for i in range(n):
+        time_s = i / fs_hz
+        if i < 200:
+            plenum = 0.0
+        elif i < 800:
+            plenum = (i - 200) * (20.0 / 600.0)
+        elif i < 1800:
+            plenum = 20.0 - (i - 800) * (18.0 / 1000.0)
+        else:
+            plenum = 2.0
+
+        voltage = 0.0
+        if 120 <= i < 140:
+            voltage = 5.0
+
+        rows.append(f"{time_s:.3f}\t{voltage:.3f}\t{plenum:.3f}\t1\n")
+
+    src.write_text("".join(rows), encoding="utf-8")
+
+    metadata = create_lvm_fixture(
+        input_path=src,
+        output_path=out_path,
+        trigger_channel="Voltage",
+        burst_channel="PLEN-PT",
+        header_row_index=3,
+        pre_ms=200.0,
+        post_ms=300.0,
+        fs_hz=fs_hz,
+        decimate=1,
+        window_anchor="failed-burst-drop",
+        failed_burst_min_rise_to_drop_ms=500.0,
+        failed_burst_min_drop_to_rise_grad_ratio=0.5,
+        rolling_trigger=5,
+        rolling_burst=31,
+    )
+
+    assert metadata["window_anchor"] == "failed-burst-drop"
+    assert metadata["failed_burst_drop_input_index"] is not None
+    assert metadata["trigger_index_in_fixture"] is None
+    assert metadata["window_anchor_index_in_fixture"] >= 0
+
+    df = pd.read_csv(out_path, sep="\t", header=3)
+    assert len(df) > 0
