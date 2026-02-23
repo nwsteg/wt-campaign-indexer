@@ -5,7 +5,20 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-KNOWN_DIAGNOSTICS = ("schlieren", "plif", "pls", "tracking", "piv", "kulite", "ir")
+KNOWN_DIAGNOSTICS = (
+    "schlieren",
+    "shadowgraph",
+    "plif",
+    "pls",
+    "tracking",
+    "piv",
+    "kulite",
+    "pcb",
+    "psp",
+    "tsp",
+    "ir",
+)
+IGNORED_DIAGNOSTIC_DIRS = {".ipynb_checkpoints", "__pycache__", "pycache"}
 _FST_PATTERN = re.compile(r"^FST_?(\d+)$", re.IGNORECASE)
 
 
@@ -97,6 +110,8 @@ def _discover_diagnostics(fst_dir: Path) -> tuple[DiagnosticDiscovery, ...]:
     known = set(KNOWN_DIAGNOSTICS)
 
     for child in sorted(entry for entry in fst_dir.iterdir() if entry.is_dir()):
+        if child.name.lower() in IGNORED_DIAGNOSTIC_DIRS:
+            continue
         diagnostic_name = child.name.lower()
         is_known = diagnostic_name in known
         runs = _discover_runs(child)
