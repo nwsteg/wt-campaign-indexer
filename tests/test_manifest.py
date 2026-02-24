@@ -118,10 +118,10 @@ def test_campaign_summary_contains_discovery_overview(tmp_path: Path):
 
     assert "# Dummy campaign summary" in summary
     assert "## Top-level overview (steady-state, 50-90 ms after burst)" in summary
-    assert "| FST_1388 | FST_1388.lvm | 1 | 1 |" in summary
-    assert "| pls | yes | 1 |" in summary
-    assert "| pls | run_S0001 | no | 10000.000 |" in summary
-    assert "Jet enabled" in summary
+    assert "| FST_1388 | pls |" in summary
+    assert "## FST traces" in summary
+    assert "### FST_1388" in summary
+    assert "_Plot directory not provided._" in summary
 
 
 def test_write_campaign_summary_writes_file(tmp_path: Path):
@@ -134,7 +134,13 @@ def test_write_campaign_summary_writes_file(tmp_path: Path):
 
     assert result_path == output_path
     assert output_path.exists()
-    assert "FST_1391" in output_path.read_text(encoding="utf-8")
+    markdown = output_path.read_text(encoding="utf-8")
+    assert "FST_1391" in markdown
+
+    figure_dir = tmp_path / "campaign_summary_figs"
+    assert figure_dir.exists()
+    assert (figure_dir / "FST_1391_overview.png").exists()
+    assert "![FST_1391 trace](campaign_summary_figs/FST_1391_overview.png)" in markdown
 
     figure_dir = tmp_path / "campaign_summary_figs"
     assert figure_dir.exists()
