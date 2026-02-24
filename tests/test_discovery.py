@@ -129,3 +129,18 @@ def test_skip_txt_excludes_fst_from_discovery(tmp_path: Path):
     result = discover_campaign(tmp_path)
 
     assert [fst.normalized_name for fst in result.fsts] == ["FST_1401"]
+
+
+def test_ignores_common_cache_directories(tmp_path: Path):
+    fst_dir = tmp_path / "FST1394"
+    fst_dir.mkdir()
+    _touch(fst_dir / "FST_1394.lvm")
+
+    (fst_dir / ".ipynb_checkpoints").mkdir()
+    (fst_dir / "pycache").mkdir()
+    (fst_dir / "__pycache__").mkdir()
+    (fst_dir / "piv").mkdir()
+
+    result = discover_campaign(tmp_path)
+
+    assert [diag.name for diag in result.fsts[0].diagnostics] == ["piv"]

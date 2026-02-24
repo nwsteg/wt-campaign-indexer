@@ -9,11 +9,17 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
 
+import matplotlib
+import numpy as np
 from pygasflow.atd.viscosity import viscosity_air_southerland
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from pygasflow.isentropic import pressure_ratio, temperature_ratio
 
 from wtt_campaign_indexer.discovery import FSTDiscovery, discover_campaign
 from wtt_campaign_indexer.lvm_fixture import (
+    detect_header_row_from_file,
     infer_sample_rate_hz,
     pick_trigger_and_burst,
     read_lvm_data,
@@ -47,6 +53,8 @@ _STEADY_STATE_START_MS = 50.0
 _STEADY_STATE_END_MS = 90.0
 _ASSUMED_T0J_K = 300.0
 _DEFAULT_TUNNEL_MACH = 7.2
+_SUMMARY_PLOT_START_MS = -20.0
+_SUMMARY_PLOT_END_MS = 120.0
 
 
 def infer_rate_from_cihx(cihx_path: Path) -> float | None:
@@ -508,18 +516,85 @@ def write_fst_manifest(
     return manifest_path
 
 
+def _latest_fst_input_mtime(fst: FSTDiscovery) -> float:
+    mtimes = [fst.path.stat().st_mtime]
+    if fst.primary_lvm is not None and fst.primary_lvm.exists():
+        mtimes.append(fst.primary_lvm.stat().st_mtime)
+
+    for diagnostic in fst.diagnostics:
+        if diagnostic.path.exists():
+            mtimes.append(diagnostic.path.stat().st_mtime)
+        for run in diagnostic.runs:
+            if run.path.exists():
+                mtimes.append(run.path.stat().st_mtime)
+            for cihx_path in run.cihx_files:
+                if cihx_path.exists():
+                    mtimes.append(cihx_path.stat().st_mtime)
+            for hcc_path in run.hcc_files:
+                if hcc_path.exists():
+                    mtimes.append(hcc_path.stat().st_mtime)
+
+    return max(mtimes)
+
+
+def _load_reusable_manifest(
+    fst: FSTDiscovery,
+    tunnel_mach: float,
+    jet_used: bool,
+    jet_mach: float | None,
+) -> OrderedDict[str, object] | None:
+    manifest_path = fst.path / f"{fst.normalized_name}_manifest.json"
+    if not manifest_path.exists():
+        return None
+
+    if manifest_path.stat().st_mtime < _latest_fst_input_mtime(fst):
+        return None
+
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    if payload.get("tunnel_mach") != tunnel_mach:
+        return None
+    if payload.get("jet_used") != jet_used:
+        return None
+    if payload.get("jet_mach") != jet_mach:
+        return None
+
+    return payload
+
+
 def write_campaign_manifests(
     campaign_root: Path,
     tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
     jet_used: bool = False,
     jet_mach: float | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    reprocess_all: bool = False,
 ) -> tuple[Path, ...]:
     if progress_callback is not None:
         progress_callback("Discovering campaign folders...")
     discovery = discover_campaign(campaign_root)
     manifest_paths: list[Path] = []
     for fst in discovery.fsts:
+        manifest_path = fst.path / f"{fst.normalized_name}_manifest.json"
+        reusable_manifest = (
+            None
+            if reprocess_all
+            else _load_reusable_manifest(
+                fst,
+                tunnel_mach=tunnel_mach,
+                jet_used=jet_used,
+                jet_mach=jet_mach,
+            )
+        )
+        if reusable_manifest is not None:
+            if progress_callback is not None:
+                progress_callback(f"Reusing manifest for {fst.normalized_name}...")
+            manifest_paths.append(manifest_path)
+            continue
+
         if progress_callback is not None:
             progress_callback(f"Processing {fst.normalized_name}...")
         manifest_paths.append(
@@ -563,6 +638,7 @@ def build_campaign_summary_markdown(
     jet_used: bool = False,
     jet_mach: float | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    reprocess_all: bool = False,
 ) -> str:
     if progress_callback is not None:
         progress_callback("Discovering campaign folders...")
@@ -582,14 +658,28 @@ def build_campaign_summary_markdown(
 
     manifests_by_fst: dict[str, OrderedDict[str, object]] = {}
     for fst in discovery.fsts:
-        if progress_callback is not None:
-            progress_callback(f"Processing {fst.normalized_name}...")
-        manifest = build_fst_manifest(
-            fst,
-            tunnel_mach=tunnel_mach,
-            jet_used=jet_used,
-            jet_mach=jet_mach,
+        manifest = (
+            None
+            if reprocess_all
+            else _load_reusable_manifest(
+                fst,
+                tunnel_mach=tunnel_mach,
+                jet_used=jet_used,
+                jet_mach=jet_mach,
+            )
         )
+        if manifest is not None:
+            if progress_callback is not None:
+                progress_callback(f"Reusing manifest for {fst.normalized_name} in summary...")
+        else:
+            if progress_callback is not None:
+                progress_callback(f"Processing {fst.normalized_name}...")
+            manifest = build_fst_manifest(
+                fst,
+                tunnel_mach=tunnel_mach,
+                jet_used=jet_used,
+                jet_mach=jet_mach,
+            )
         manifests_by_fst[fst.normalized_name] = manifest
         summary = manifest["condition_summary"]
 
@@ -699,6 +789,127 @@ def build_campaign_summary_markdown(
     return "\n".join(lines)
 
 
+def _write_fst_summary_plot(
+    df_window,
+    anchor_idx: int,
+    anchor_label: str,
+    start_idx: int,
+    fs_hz: float,
+    output_path: Path,
+    fst_id: str,
+) -> None:
+    if "Voltage" not in df_window.columns:
+        raise ValueError("Trigger channel 'Voltage' not found in LVM data.")
+    if "PLEN-PT" not in df_window.columns:
+        raise ValueError("Plenum channel 'PLEN-PT' not found in LVM data.")
+
+    indices = np.arange(start_idx, start_idx + len(df_window))
+    ms = (indices - anchor_idx) * 1000.0 / fs_hz
+
+    fig, ax1 = plt.subplots(figsize=(8, 4.5))
+    ax1.plot(ms, df_window["PLEN-PT"], color="tab:blue", label="PLEN-PT")
+    ax1.set_xlabel(f"Time from {anchor_label} (ms)")
+    ax1.set_ylabel("PLEN-PT", color="tab:blue")
+    ax1.tick_params(axis="y", labelcolor="tab:blue")
+    ax1.grid(True, alpha=0.3)
+
+    ax2 = ax1.twinx()
+    ax2.plot(ms, df_window["Voltage"], color="tab:red", label="Voltage")
+    ax2.set_ylabel("Voltage", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
+
+    ax1.axvline(0.0, color="k", linestyle="--", linewidth=1)
+    ax1.set_title(f"{fst_id}: trigger + plenum around {anchor_label}")
+
+    lines = ax1.get_lines() + ax2.get_lines()
+    ax1.legend(lines, [line.get_label() for line in lines], loc="upper left")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
+def write_campaign_summary_figures(
+    campaign_root: Path,
+    summary_output_path: Path,
+    progress_callback: Callable[[str], None] | None = None,
+    reprocess_all: bool = False,
+) -> Path:
+    figure_dir = Path(summary_output_path).parent / "campaign_summary_figs"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+
+    discovery = discover_campaign(campaign_root)
+    for fst in discovery.fsts:
+        if fst.primary_lvm is None:
+            if progress_callback is not None:
+                progress_callback(f"Skipping plot for {fst.normalized_name}: missing LVM.")
+            continue
+
+        output_path = figure_dir / f"{fst.normalized_name}_overview.png"
+        if not reprocess_all and output_path.exists() and fst.primary_lvm is not None:
+            if output_path.stat().st_mtime >= fst.primary_lvm.stat().st_mtime:
+                if progress_callback is not None:
+                    progress_callback(f"Reusing plot for {fst.normalized_name}...")
+                continue
+
+        try:
+            try:
+                header_row_index = detect_header_row_from_file(
+                    fst.primary_lvm,
+                    trigger_channel="Voltage",
+                    burst_channel="PLEN-PT",
+                )
+            except ValueError:
+                header_row_index = 23
+
+            data = read_lvm_data(fst.primary_lvm, header_row_index=header_row_index)
+            anchor_label = "burst"
+            try:
+                detection = pick_trigger_and_burst(
+                    data,
+                    trigger_channel="Voltage",
+                    burst_channel="PLEN-PT",
+                )
+                anchor_idx = detection.burst_idx
+            except Exception:
+                detection = pick_trigger_and_burst(
+                    data,
+                    trigger_channel="Voltage",
+                    burst_channel=None,
+                )
+                anchor_idx = detection.trigger_idx
+                anchor_label = "trigger"
+
+            if anchor_idx is None:
+                anchor_idx = detection.trigger_idx
+                anchor_label = "trigger"
+            fs_hz = infer_sample_rate_hz(data)
+
+            start_idx = anchor_idx + int(round(_SUMMARY_PLOT_START_MS * fs_hz / 1000.0))
+            end_idx = anchor_idx + int(round(_SUMMARY_PLOT_END_MS * fs_hz / 1000.0))
+            start_idx = max(0, start_idx)
+            end_idx = min(len(data) - 1, end_idx)
+            if end_idx <= start_idx:
+                raise ValueError("Plot window was empty after anchor detection.")
+
+            window = data.iloc[start_idx : end_idx + 1]
+            _write_fst_summary_plot(
+                window,
+                anchor_idx=anchor_idx,
+                anchor_label=anchor_label,
+                start_idx=start_idx,
+                fs_hz=fs_hz,
+                output_path=output_path,
+                fst_id=fst.normalized_name,
+            )
+        except Exception as exc:
+            if progress_callback is not None:
+                progress_callback(f"Skipping plot for {fst.normalized_name}: {exc}")
+
+    return figure_dir
+
+
 def write_campaign_summary(
     campaign_root: Path,
     output_path: Path,
@@ -706,6 +917,7 @@ def write_campaign_summary(
     jet_used: bool = False,
     jet_mach: float | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    reprocess_all: bool = False,
 ) -> Path:
     output_path = Path(output_path)
     markdown = build_campaign_summary_markdown(
@@ -714,6 +926,13 @@ def write_campaign_summary(
         jet_used=jet_used,
         jet_mach=jet_mach,
         progress_callback=progress_callback,
+        reprocess_all=reprocess_all,
     )
     output_path.write_text(markdown, encoding="utf-8")
+    write_campaign_summary_figures(
+        campaign_root,
+        output_path,
+        progress_callback=progress_callback,
+        reprocess_all=reprocess_all,
+    )
     return output_path
