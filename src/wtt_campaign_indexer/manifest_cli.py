@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from wtt_campaign_indexer.manifest import (
@@ -14,12 +13,39 @@ def _print_progress(message: str) -> None:
     print(message, flush=True)
 
 
+def _prompt_text(prompt: str) -> str | None:
+    try:
+        return input(prompt)
+    except EOFError:
+        return None
+
+
 def _prompt_bool(prompt: str, default: bool) -> bool:
     suffix = "[Y/n]" if default else "[y/N]"
-    raw = input(f"{prompt} {suffix}: ").strip().lower()
-    if not raw:
+    raw = _prompt_text(f"{prompt} {suffix}: ")
+    if raw is None:
+        print("Input unavailable; using default selection.", flush=True)
         return default
-    return raw in {"y", "yes", "true", "1"}
+
+    normalized = raw.strip().lower()
+    if not normalized:
+        return default
+    return normalized in {"y", "yes", "true", "1"}
+
+
+def _resolve_tunnel_mach(tunnel_mach: float | None) -> float:
+    if tunnel_mach is not None:
+        return tunnel_mach
+
+    raw = _prompt_text("Enter tunnel Mach number for this campaign summary [7.2]: ")
+    if raw is None:
+        print("Input unavailable; defaulting tunnel Mach to 7.2.", flush=True)
+        return 7.2
+
+    normalized = raw.strip()
+    if not normalized:
+        return 7.2
+    return float(normalized)
 
 
 def _resolve_jet_options(
@@ -34,41 +60,57 @@ def _resolve_jet_options(
             raise ValueError("--jet-mach is required when --jet-used is provided.")
         return True, jet_mach
 
-    if not sys.stdin.isatty():
-        return False, None
-
     prompted_jet_used = _prompt_bool("Was a jet used for this campaign summary?", default=False)
     if not prompted_jet_used:
         return False, None
 
-    raw_mach = input("Enter jet Mach number (e.g. 3.09): ").strip()
-    if not raw_mach:
+    raw_mach = _prompt_text("Enter jet Mach number (e.g. 3.09): ")
+    if raw_mach is None:
         raise ValueError("Jet Mach number is required when jet is used.")
-    return True, float(raw_mach)
+
+    normalized = raw_mach.strip()
+    if not normalized:
+        raise ValueError("Jet Mach number is required when jet is used.")
+    return True, float(normalized)
+
+
+def _resolve_summary_output(campaign_root: Path, summary_output: Path | None) -> Path:
+    if summary_output is not None:
+        return summary_output
+    return campaign_root / "campaign_summary.md"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Write campaign manifest files and a campaign summary markdown report"
     )
-    parser.add_argument("--campaign-root", type=Path, required=True)
+    parser.add_argument(
+        "campaign_root",
+        type=Path,
+        nargs="?",
+        default=Path("."),
+        help="Campaign root folder (defaults to current directory)",
+    )
     parser.add_argument(
         "--summary-output",
         type=Path,
-        default=Path("campaign_summary.md"),
-        help="Path to markdown summary output file",
+        default=None,
+        help=(
+            "Path to markdown summary output file "
+            "(defaults to <campaign_root>/campaign_summary.md)"
+        ),
     )
     parser.add_argument(
         "--tunnel-mach",
         type=float,
-        default=7.2,
-        help="Tunnel Mach number used for isentropic pinf calculations",
+        default=None,
+        help="Tunnel Mach number used for isentropic pinf calculations (prompted if omitted)",
     )
     parser.add_argument(
         "--jet-used",
         action="store_true",
         default=None,
-        help="Set when a jet was used (if omitted, interactive prompt is shown in TTY mode)",
+        help="Set when a jet was used (if omitted, you are prompted)",
     )
     parser.add_argument(
         "--no-jet-used",
@@ -87,12 +129,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    summary_output = _resolve_summary_output(args.campaign_root, args.summary_output)
+    tunnel_mach = _resolve_tunnel_mach(args.tunnel_mach)
     jet_used, jet_mach = _resolve_jet_options(jet_used=args.jet_used, jet_mach=args.jet_mach)
 
     print("Starting campaign manifest generation...", flush=True)
     manifest_paths = write_campaign_manifests(
         args.campaign_root,
-        tunnel_mach=args.tunnel_mach,
+        tunnel_mach=tunnel_mach,
         jet_used=jet_used,
         jet_mach=jet_mach,
         progress_callback=_print_progress,
@@ -100,15 +144,15 @@ def main() -> None:
     print("Starting campaign summary generation...", flush=True)
     summary_path = write_campaign_summary(
         args.campaign_root,
-        args.summary_output,
-        tunnel_mach=args.tunnel_mach,
+        summary_output,
+        tunnel_mach=tunnel_mach,
         jet_used=jet_used,
         jet_mach=jet_mach,
         progress_callback=_print_progress,
     )
     print(f"Wrote {len(manifest_paths)} manifest files")
     print(f"Wrote summary to {summary_path}")
-    print(f"Tunnel Mach={args.tunnel_mach}; jet_used={jet_used}; jet_mach={jet_mach}")
+    print(f"Tunnel Mach={tunnel_mach}; jet_used={jet_used}; jet_mach={jet_mach}")
 
 
 if __name__ == "__main__":
