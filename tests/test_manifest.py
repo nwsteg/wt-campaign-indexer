@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 from wtt_campaign_indexer.discovery import discover_campaign
@@ -123,7 +124,7 @@ def test_campaign_summary_contains_discovery_overview(tmp_path: Path):
 def test_write_campaign_summary_writes_file(tmp_path: Path):
     fst_dir = tmp_path / "FST1391"
     fst_dir.mkdir()
-    _touch(fst_dir / "FST_1391.lvm")
+    shutil.copyfile("tests/fixtures/sample_input.lvm", fst_dir / "FST_1391.lvm")
 
     output_path = tmp_path / "campaign_summary.md"
     result_path = write_campaign_summary(tmp_path, output_path)
@@ -131,6 +132,10 @@ def test_write_campaign_summary_writes_file(tmp_path: Path):
     assert result_path == output_path
     assert output_path.exists()
     assert "FST_1391" in output_path.read_text(encoding="utf-8")
+
+    figure_dir = tmp_path / "campaign_summary_figs"
+    assert figure_dir.exists()
+    assert (figure_dir / "FST_1391_overview.png").exists()
 
 
 def test_infer_rate_supports_record_rate_pattern(tmp_path: Path):
