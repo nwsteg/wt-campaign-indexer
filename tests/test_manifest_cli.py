@@ -4,6 +4,7 @@ import pytest
 
 from wtt_campaign_indexer.manifest_cli import (
     _resolve_jet_options,
+    _resolve_reprocess_all,
     _resolve_summary_output,
     _resolve_tunnel_mach,
     build_parser,
@@ -72,3 +73,54 @@ def test_resolve_summary_output_respects_explicit_path() -> None:
     explicit = Path("custom/output.md")
 
     assert _resolve_summary_output(campaign_root, explicit) == explicit
+
+
+def test_resolve_reprocess_all_obeys_explicit_flags(tmp_path: Path) -> None:
+    summary_path = tmp_path / "campaign_summary.md"
+
+    assert (
+        _resolve_reprocess_all(
+            tmp_path,
+            summary_path,
+            reprocess_all=True,
+            reuse_existing=False,
+        )
+        is True
+    )
+    assert (
+        _resolve_reprocess_all(
+            tmp_path,
+            summary_path,
+            reprocess_all=False,
+            reuse_existing=True,
+        )
+        is False
+    )
+
+
+def test_resolve_reprocess_all_prompts_when_outputs_exist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fst_dir = tmp_path / "FST1391"
+    fst_dir.mkdir()
+    (fst_dir / "FST_1391.lvm").write_text("", encoding="utf-8")
+    (fst_dir / "FST_1391_manifest.json").write_text("{}", encoding="utf-8")
+
+    summary_path = tmp_path / "campaign_summary.md"
+    summary_path.write_text("existing", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "wtt_campaign_indexer.manifest_cli._prompt_bool",
+        lambda _prompt, default: True,
+    )
+
+    assert (
+        _resolve_reprocess_all(
+            tmp_path,
+            summary_path,
+            reprocess_all=False,
+            reuse_existing=False,
+        )
+        is True
+    )

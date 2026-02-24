@@ -2,11 +2,14 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from wtt_campaign_indexer.discovery import discover_campaign
 from wtt_campaign_indexer.manifest import (
     build_campaign_summary_markdown,
     infer_rate_from_cihx,
     infer_rate_from_hcc,
+    write_campaign_manifests,
     write_campaign_summary,
     write_fst_manifest,
 )
@@ -225,3 +228,35 @@ def test_campaign_summary_skips_fst_with_skip_marker(tmp_path: Path):
 
     assert "FST_1388" in summary
     assert "FST_1389" not in summary
+
+
+def test_write_campaign_manifests_reuses_existing_when_unchanged(tmp_path: Path, monkeypatch):
+    fst_dir = tmp_path / "FST1391"
+    fst_dir.mkdir()
+    _touch(fst_dir / "FST_1391.lvm")
+
+    write_campaign_manifests(tmp_path)
+
+    monkeypatch.setattr(
+        "wtt_campaign_indexer.manifest.build_fst_manifest",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("should not rebuild")),
+    )
+
+    # Reuse path should not call build_fst_manifest again.
+    write_campaign_manifests(tmp_path, reprocess_all=False)
+
+
+def test_write_campaign_manifests_reprocess_all_forces_rebuild(tmp_path: Path, monkeypatch):
+    fst_dir = tmp_path / "FST1391"
+    fst_dir.mkdir()
+    _touch(fst_dir / "FST_1391.lvm")
+
+    write_campaign_manifests(tmp_path)
+
+    monkeypatch.setattr(
+        "wtt_campaign_indexer.manifest.build_fst_manifest",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("forced rebuild")),
+    )
+
+    with pytest.raises(RuntimeError, match="forced rebuild"):
+        write_campaign_manifests(tmp_path, reprocess_all=True)

@@ -516,18 +516,85 @@ def write_fst_manifest(
     return manifest_path
 
 
+def _latest_fst_input_mtime(fst: FSTDiscovery) -> float:
+    mtimes = [fst.path.stat().st_mtime]
+    if fst.primary_lvm is not None and fst.primary_lvm.exists():
+        mtimes.append(fst.primary_lvm.stat().st_mtime)
+
+    for diagnostic in fst.diagnostics:
+        if diagnostic.path.exists():
+            mtimes.append(diagnostic.path.stat().st_mtime)
+        for run in diagnostic.runs:
+            if run.path.exists():
+                mtimes.append(run.path.stat().st_mtime)
+            for cihx_path in run.cihx_files:
+                if cihx_path.exists():
+                    mtimes.append(cihx_path.stat().st_mtime)
+            for hcc_path in run.hcc_files:
+                if hcc_path.exists():
+                    mtimes.append(hcc_path.stat().st_mtime)
+
+    return max(mtimes)
+
+
+def _load_reusable_manifest(
+    fst: FSTDiscovery,
+    tunnel_mach: float,
+    jet_used: bool,
+    jet_mach: float | None,
+) -> OrderedDict[str, object] | None:
+    manifest_path = fst.path / f"{fst.normalized_name}_manifest.json"
+    if not manifest_path.exists():
+        return None
+
+    if manifest_path.stat().st_mtime < _latest_fst_input_mtime(fst):
+        return None
+
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    if payload.get("tunnel_mach") != tunnel_mach:
+        return None
+    if payload.get("jet_used") != jet_used:
+        return None
+    if payload.get("jet_mach") != jet_mach:
+        return None
+
+    return payload
+
+
 def write_campaign_manifests(
     campaign_root: Path,
     tunnel_mach: float = _DEFAULT_TUNNEL_MACH,
     jet_used: bool = False,
     jet_mach: float | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    reprocess_all: bool = False,
 ) -> tuple[Path, ...]:
     if progress_callback is not None:
         progress_callback("Discovering campaign folders...")
     discovery = discover_campaign(campaign_root)
     manifest_paths: list[Path] = []
     for fst in discovery.fsts:
+        manifest_path = fst.path / f"{fst.normalized_name}_manifest.json"
+        reusable_manifest = (
+            None
+            if reprocess_all
+            else _load_reusable_manifest(
+                fst,
+                tunnel_mach=tunnel_mach,
+                jet_used=jet_used,
+                jet_mach=jet_mach,
+            )
+        )
+        if reusable_manifest is not None:
+            if progress_callback is not None:
+                progress_callback(f"Reusing manifest for {fst.normalized_name}...")
+            manifest_paths.append(manifest_path)
+            continue
+
         if progress_callback is not None:
             progress_callback(f"Processing {fst.normalized_name}...")
         manifest_paths.append(
@@ -571,6 +638,7 @@ def build_campaign_summary_markdown(
     jet_used: bool = False,
     jet_mach: float | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    reprocess_all: bool = False,
 ) -> str:
     if progress_callback is not None:
         progress_callback("Discovering campaign folders...")
@@ -590,14 +658,28 @@ def build_campaign_summary_markdown(
 
     manifests_by_fst: dict[str, OrderedDict[str, object]] = {}
     for fst in discovery.fsts:
-        if progress_callback is not None:
-            progress_callback(f"Processing {fst.normalized_name}...")
-        manifest = build_fst_manifest(
-            fst,
-            tunnel_mach=tunnel_mach,
-            jet_used=jet_used,
-            jet_mach=jet_mach,
+        manifest = (
+            None
+            if reprocess_all
+            else _load_reusable_manifest(
+                fst,
+                tunnel_mach=tunnel_mach,
+                jet_used=jet_used,
+                jet_mach=jet_mach,
+            )
         )
+        if manifest is not None:
+            if progress_callback is not None:
+                progress_callback(f"Reusing manifest for {fst.normalized_name} in summary...")
+        else:
+            if progress_callback is not None:
+                progress_callback(f"Processing {fst.normalized_name}...")
+            manifest = build_fst_manifest(
+                fst,
+                tunnel_mach=tunnel_mach,
+                jet_used=jet_used,
+                jet_mach=jet_mach,
+            )
         manifests_by_fst[fst.normalized_name] = manifest
         summary = manifest["condition_summary"]
 
@@ -752,6 +834,7 @@ def write_campaign_summary_figures(
     campaign_root: Path,
     summary_output_path: Path,
     progress_callback: Callable[[str], None] | None = None,
+    reprocess_all: bool = False,
 ) -> Path:
     figure_dir = Path(summary_output_path).parent / "campaign_summary_figs"
     figure_dir.mkdir(parents=True, exist_ok=True)
@@ -762,6 +845,13 @@ def write_campaign_summary_figures(
             if progress_callback is not None:
                 progress_callback(f"Skipping plot for {fst.normalized_name}: missing LVM.")
             continue
+
+        output_path = figure_dir / f"{fst.normalized_name}_overview.png"
+        if not reprocess_all and output_path.exists() and fst.primary_lvm is not None:
+            if output_path.stat().st_mtime >= fst.primary_lvm.stat().st_mtime:
+                if progress_callback is not None:
+                    progress_callback(f"Reusing plot for {fst.normalized_name}...")
+                continue
 
         try:
             try:
@@ -804,7 +894,6 @@ def write_campaign_summary_figures(
                 raise ValueError("Plot window was empty after anchor detection.")
 
             window = data.iloc[start_idx : end_idx + 1]
-            output_path = figure_dir / f"{fst.normalized_name}_overview.png"
             _write_fst_summary_plot(
                 window,
                 anchor_idx=anchor_idx,
@@ -828,6 +917,7 @@ def write_campaign_summary(
     jet_used: bool = False,
     jet_mach: float | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    reprocess_all: bool = False,
 ) -> Path:
     output_path = Path(output_path)
     markdown = build_campaign_summary_markdown(
@@ -836,11 +926,13 @@ def write_campaign_summary(
         jet_used=jet_used,
         jet_mach=jet_mach,
         progress_callback=progress_callback,
+        reprocess_all=reprocess_all,
     )
     output_path.write_text(markdown, encoding="utf-8")
     write_campaign_summary_figures(
         campaign_root,
         output_path,
         progress_callback=progress_callback,
+        reprocess_all=reprocess_all,
     )
     return output_path

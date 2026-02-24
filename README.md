@@ -132,6 +132,8 @@ If `--tunnel-mach` is omitted, the CLI prompts for tunnel Mach (default 7.2). If
 
 If `--jet-used`/`--no-jet-used` is omitted, the CLI prompts whether a jet was used and (if yes) asks for jet Mach.
 
+If existing summary/manifests/plots are detected, the CLI prompts whether to reprocess everything or reuse unchanged products. You can skip the prompt with `--reprocess-all` or `--reuse-existing`.
+
 To skip an FST folder from manifest/summary generation, add a `skip.txt` file in that FST folder root (for example: `FST1391/skip.txt`).
 
 ## Quality checks
