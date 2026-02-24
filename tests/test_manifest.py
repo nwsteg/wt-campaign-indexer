@@ -127,7 +127,7 @@ def test_campaign_summary_contains_discovery_overview(tmp_path: Path):
 def test_write_campaign_summary_writes_file(tmp_path: Path):
     fst_dir = tmp_path / "FST1391"
     fst_dir.mkdir()
-    shutil.copyfile("tests/fixtures/sample_input.lvm", fst_dir / "FST_1391.lvm")
+    _write_long_lvm(fst_dir / "FST_1391.lvm")
 
     output_path = tmp_path / "campaign_summary.md"
     result_path = write_campaign_summary(tmp_path, output_path)
@@ -266,3 +266,112 @@ def test_write_campaign_manifests_reprocess_all_forces_rebuild(tmp_path: Path, m
 
     with pytest.raises(RuntimeError, match="forced rebuild"):
         write_campaign_manifests(tmp_path, reprocess_all=True)
+
+
+def _write_long_lvm(path: Path, n: int = 800, fs_hz: float = 1000.0) -> None:
+    lines = ["LabVIEW Measurement\n", "meta\n", "Time\tVoltage\tPLEN-PT\tTC 8\tLVDT\n"]
+    dt = 1.0 / fs_hz
+    for idx in range(n):
+        t = idx * dt
+        if idx < 180:
+            voltage = 0.0
+        elif idx > 200:
+            voltage = 5.0
+        else:
+            voltage = (idx - 180) * 0.25
+        if idx < 260:
+            plenum = 20.0
+            tc8 = 300.0
+            lvdt = 30.0
+        elif idx < 300:
+            plenum = 20.0 + (idx - 260) * 0.5
+            tc8 = 300.0 + (idx - 260) * 0.05
+            lvdt = 30.0 + (idx - 260) * 0.2
+        else:
+            plenum = 40.0
+            tc8 = 302.0
+            lvdt = 38.0
+        lines.append(f"{t:.6f}	{voltage:.3f}	{plenum:.6f}	{tc8:.6f}	{lvdt:.6f}\n")
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+def _baseline_steady_state_summary(lvm_path: Path):
+    from wtt_campaign_indexer.lvm_fixture import (
+        detect_header_row_from_file,
+        infer_sample_rate_hz,
+        pick_trigger_and_burst,
+        read_lvm_data,
+    )
+
+    header_row_index = detect_header_row_from_file(lvm_path, "Voltage", "PLEN-PT")
+    df = read_lvm_data(lvm_path, header_row_index=header_row_index)
+    detection = pick_trigger_and_burst(df, trigger_channel="Voltage", burst_channel="PLEN-PT")
+    fs_hz = infer_sample_rate_hz(df)
+    start_idx = detection.burst_idx + int(round(50.0 * fs_hz / 1000.0))
+    end_idx = detection.burst_idx + int(round(90.0 * fs_hz / 1000.0))
+    window = df.iloc[start_idx : end_idx + 1]
+    return {
+        "p0": float(window["PLEN-PT"].mean()),
+        "T0": float(window["TC 8"].mean()),
+        "p0j": float(window["LVDT"].mean()),
+    }
+
+
+def test_two_pass_steady_state_matches_full_read_within_tolerance(tmp_path: Path):
+    from wtt_campaign_indexer.manifest import compute_steady_state_conditions
+
+    lvm_path = tmp_path / "FST_1391.lvm"
+    _write_long_lvm(lvm_path)
+
+    baseline = _baseline_steady_state_summary(lvm_path)
+    summary, _notes = compute_steady_state_conditions(lvm_path)
+
+    assert summary["p0"] == pytest.approx(baseline["p0"], rel=1e-3, abs=1e-3)
+    assert summary["T0"] == pytest.approx(baseline["T0"], rel=1e-3, abs=1e-3)
+    assert summary["p0j"] == pytest.approx(baseline["p0j"], rel=1e-3, abs=1e-3)
+
+
+def test_summary_figure_uses_expected_window_bounds(tmp_path: Path, monkeypatch):
+    fst_dir = tmp_path / "FST1391"
+    fst_dir.mkdir()
+    _write_long_lvm(fst_dir / "FST_1391.lvm")
+
+    captured = {}
+
+    def _capture(df_window, anchor_idx, anchor_label, start_idx, fs_hz, output_path, fst_id, jet_used):
+        captured["len"] = len(df_window)
+        captured["start_ms"] = (start_idx - anchor_idx) * 1000.0 / fs_hz
+        captured["end_ms"] = (start_idx + len(df_window) - 1 - anchor_idx) * 1000.0 / fs_hz
+
+    monkeypatch.setattr("wtt_campaign_indexer.manifest._write_fst_summary_plot", _capture)
+
+    out = tmp_path / "campaign_summary.md"
+    write_campaign_summary(tmp_path, out)
+
+    assert captured["start_ms"] == pytest.approx(-20.0, abs=2.0)
+    assert captured["end_ms"] == pytest.approx(120.0, abs=2.0)
+    assert captured["len"] > 10
+
+
+def test_fallback_used_when_coarse_detection_confidence_insufficient(tmp_path: Path, monkeypatch):
+    from wtt_campaign_indexer.lvm_fixture import CoarseEventEstimate
+    from wtt_campaign_indexer.manifest import compute_steady_state_conditions
+
+    lvm_path = tmp_path / "FST_1391.lvm"
+    _write_long_lvm(lvm_path)
+
+    monkeypatch.setattr(
+        "wtt_campaign_indexer.manifest.detect_event_index_coarse",
+        lambda *args, **kwargs: CoarseEventEstimate(
+            trigger_idx=None,
+            burst_idx=None,
+            anchor_idx=None,
+            sample_rate_hz=None,
+            confidence_ok=False,
+            reason="simulated low confidence",
+        ),
+    )
+
+    summary, notes = compute_steady_state_conditions(lvm_path)
+    assert summary["p0"] is not None
+    assert any("coarse detection confidence insufficient" in note.lower() for note in notes)
