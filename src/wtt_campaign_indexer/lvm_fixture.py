@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,16 @@ class FailedBurstResult:
     rise_to_drop_ms: float
     rise_grad: float
     drop_grad: float
+
+
+@dataclass(frozen=True)
+class CoarseEventEstimate:
+    trigger_idx: int | None
+    burst_idx: int | None
+    anchor_idx: int | None
+    sample_rate_hz: float | None
+    confidence_ok: bool
+    reason: str
 
 
 def read_lvm_data(
@@ -72,6 +83,124 @@ def read_lvm_data(
         df[column] = pd.to_numeric(df[column], errors="coerce")
     df.interpolate(method="linear", inplace=True, limit_direction="both", axis=0)
     return df
+
+
+def read_lvm_data_window(
+    file_path: Path,
+    header_row_index: int,
+    start_data_row: int,
+    end_data_row: int,
+    usecols: list[int] | None = None,
+) -> pd.DataFrame:
+    """Read a bounded [start_data_row, end_data_row] LVM data interval."""
+    if start_data_row < 0:
+        start_data_row = 0
+    if end_data_row < start_data_row:
+        raise ValueError("end_data_row must be >= start_data_row")
+
+    header_df = pd.read_csv(
+        file_path,
+        sep="\t",
+        header=None,
+        nrows=1,
+        skiprows=header_row_index,
+        usecols=usecols,
+    )
+    header_names = [str(col).strip() for col in header_df.iloc[0]]
+    expected_cols = len(header_names)
+    selected_usecols = usecols if usecols is not None else list(range(expected_cols))
+
+    start_file_row = header_row_index + 1 + start_data_row
+    end_file_row = header_row_index + 1 + end_data_row
+
+    buffer = io.StringIO()
+    with file_path.open("r", encoding="utf-8", errors="replace") as file_obj:
+        for row_idx, line in enumerate(file_obj):
+            if row_idx < start_file_row:
+                continue
+            if row_idx > end_file_row:
+                break
+            buffer.write(line)
+
+    if buffer.tell() == 0:
+        return pd.DataFrame(columns=header_names)
+
+    buffer.seek(0)
+    df = pd.read_csv(
+        buffer,
+        sep="\t",
+        header=None,
+        engine="c",
+        na_values=[""],
+        low_memory=True,
+        on_bad_lines="skip",
+        usecols=selected_usecols,
+    )
+    df.columns = header_names
+    for column in df.columns:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+    df.interpolate(method="linear", inplace=True, limit_direction="both", axis=0)
+    return df
+
+
+def detect_event_index_coarse(
+    file_path: Path,
+    header_row_index: int,
+    trigger_channel: str = "Voltage",
+    burst_channel: str | None = "PLEN-PT",
+    read_every_n: int = 10,
+    rolling_trigger: int = 6,
+    rolling_burst: int = 100,
+) -> CoarseEventEstimate:
+    if read_every_n < 1:
+        raise ValueError("read_every_n must be >= 1")
+    try:
+        coarse_df = read_lvm_data(
+            file_path,
+            header_row_index=header_row_index,
+            read_every_n=read_every_n,
+        )
+        detection = pick_trigger_and_burst(
+            coarse_df,
+            trigger_channel=trigger_channel,
+            burst_channel=burst_channel,
+            rolling_trigger=rolling_trigger,
+            rolling_burst=rolling_burst,
+        )
+        coarse_fs = infer_sample_rate_hz(coarse_df)
+        fs_hz = coarse_fs * read_every_n
+    except Exception as exc:
+        return CoarseEventEstimate(
+            trigger_idx=None,
+            burst_idx=None,
+            anchor_idx=None,
+            sample_rate_hz=None,
+            confidence_ok=False,
+            reason=f"coarse detect failed: {exc}",
+        )
+
+    trigger_idx = detection.trigger_idx * read_every_n
+    burst_idx = detection.burst_idx * read_every_n if detection.burst_idx is not None else None
+    anchor_idx = burst_idx if burst_idx is not None else trigger_idx
+    confidence_ok = burst_idx is not None
+    reason = "ok" if confidence_ok else "burst channel unavailable in coarse detect"
+    if confidence_ok:
+        delta = burst_idx - trigger_idx
+        max_expected_delta = int(round(fs_hz * 0.35))
+        if delta < 0 or delta > max_expected_delta:
+            confidence_ok = False
+            reason = (
+                "coarse burst-trigger spacing out of expected range "
+                f"(delta={delta}, max={max_expected_delta})"
+            )
+    return CoarseEventEstimate(
+        trigger_idx=int(trigger_idx),
+        burst_idx=int(burst_idx) if burst_idx is not None else None,
+        anchor_idx=int(anchor_idx),
+        sample_rate_hz=float(fs_hz),
+        confidence_ok=confidence_ok,
+        reason=reason,
+    )
 
 
 def _rolling_gradient(values: pd.Series, window: int) -> np.ndarray:

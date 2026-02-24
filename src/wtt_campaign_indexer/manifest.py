@@ -19,10 +19,12 @@ from pygasflow.isentropic import pressure_ratio, temperature_ratio
 
 from wtt_campaign_indexer.discovery import FSTDiscovery, discover_campaign
 from wtt_campaign_indexer.lvm_fixture import (
+    detect_event_index_coarse,
     detect_header_row_from_file,
     infer_sample_rate_hz,
     pick_trigger_and_burst,
     read_lvm_data,
+    read_lvm_data_window,
 )
 
 _CONDITION_UNITS = {
@@ -55,6 +57,73 @@ _ASSUMED_T0J_K = 300.0
 _DEFAULT_TUNNEL_MACH = 7.2
 _SUMMARY_PLOT_START_MS = -20.0
 _SUMMARY_PLOT_END_MS = 120.0
+
+
+def _read_lvm_event_window(
+    lvm_path: Path,
+    header_row_index: int,
+    start_ms: float,
+    end_ms: float,
+    require_burst_confidence: bool,
+    fallback_notes: list[str],
+) -> tuple[object, int, int, float, str]:
+    coarse = detect_event_index_coarse(
+        lvm_path,
+        header_row_index=header_row_index,
+        trigger_channel="Voltage",
+        burst_channel="PLEN-PT",
+        read_every_n=10,
+    )
+
+    if coarse.confidence_ok and coarse.anchor_idx is not None and coarse.sample_rate_hz is not None:
+        fs_hz = coarse.sample_rate_hz
+        start_idx = max(0, coarse.anchor_idx + int(round(start_ms * fs_hz / 1000.0)))
+        end_idx = coarse.anchor_idx + int(round(end_ms * fs_hz / 1000.0))
+        if end_idx <= start_idx:
+            raise ValueError("Event window was empty after coarse detection.")
+
+        pad_ms = 30.0
+        pad_samples = int(round(pad_ms * fs_hz / 1000.0))
+        bounded_start = max(0, start_idx - pad_samples)
+        bounded_end = end_idx + pad_samples
+
+        window_df = read_lvm_data_window(
+            lvm_path,
+            header_row_index=header_row_index,
+            start_data_row=bounded_start,
+            end_data_row=bounded_end,
+        )
+        if window_df.empty:
+            fallback_notes.append("Coarse event window read returned empty; using full read fallback.")
+        else:
+            rel_start = max(0, start_idx - bounded_start)
+            rel_end = min(len(window_df) - 1, end_idx - bounded_start)
+            if rel_end > rel_start:
+                return (
+                    window_df.iloc[rel_start : rel_end + 1].copy(),
+                    start_idx,
+                    coarse.anchor_idx,
+                    fs_hz,
+                    "burst" if coarse.burst_idx is not None else "trigger",
+                )
+    if require_burst_confidence:
+        fallback_notes.append(f"Coarse detection confidence insufficient ({coarse.reason}); using full read fallback.")
+
+    data = read_lvm_data(lvm_path, header_row_index=header_row_index)
+    detection = pick_trigger_and_burst(data, trigger_channel="Voltage", burst_channel="PLEN-PT")
+    anchor = detection.burst_idx
+    label = "burst"
+    if anchor is None:
+        if require_burst_confidence:
+            raise ValueError("Burst index could not be detected.")
+        anchor = detection.trigger_idx
+        label = "trigger"
+    fs_hz = infer_sample_rate_hz(data)
+    start_idx = max(0, anchor + int(round(start_ms * fs_hz / 1000.0)))
+    end_idx = min(len(data) - 1, anchor + int(round(end_ms * fs_hz / 1000.0)))
+    if end_idx <= start_idx:
+        raise ValueError("Event window was empty after anchor detection.")
+    return data.iloc[start_idx : end_idx + 1].copy(), start_idx, anchor, fs_hz, label
 
 
 def infer_rate_from_cihx(cihx_path: Path) -> float | None:
@@ -285,25 +354,26 @@ def compute_steady_state_conditions(
 ) -> tuple[OrderedDict[str, float | None], list[str]]:
     notes: list[str] = []
     try:
-        df = read_lvm_data(lvm_path, header_row_index=23)
-        detection = pick_trigger_and_burst(df, trigger_channel="Voltage", burst_channel="PLEN-PT")
-        if detection.burst_idx is None:
-            raise ValueError("Burst index could not be detected.")
-        fs_hz = infer_sample_rate_hz(df)
+        try:
+            header_row_index = detect_header_row_from_file(
+                lvm_path,
+                trigger_channel="Voltage",
+                burst_channel="PLEN-PT",
+            )
+        except ValueError:
+            header_row_index = 23
+
+        window, start_idx, anchor_idx, _fs_hz, anchor_label = _read_lvm_event_window(
+            lvm_path,
+            header_row_index=header_row_index,
+            start_ms=_STEADY_STATE_START_MS,
+            end_ms=_STEADY_STATE_END_MS,
+            require_burst_confidence=True,
+            fallback_notes=notes,
+        )
     except Exception as exc:
         notes.append(f"Unable to compute steady-state summary from LVM: {exc}")
         return OrderedDict((key, None) for key in _CONDITION_UNITS), notes
-
-    start_idx = detection.burst_idx + int(round(_STEADY_STATE_START_MS * fs_hz / 1000.0))
-    end_idx = detection.burst_idx + int(round(_STEADY_STATE_END_MS * fs_hz / 1000.0))
-    start_idx = max(0, start_idx)
-    end_idx = min(len(df) - 1, end_idx)
-
-    if end_idx <= start_idx:
-        notes.append("Steady-state window was empty after burst detection.")
-        return OrderedDict((key, None) for key in _CONDITION_UNITS), notes
-
-    window = df.iloc[start_idx : end_idx + 1]
 
     p0 = _select_channel(window, "PLEN-PT")
     t0 = _select_channel(window, "TC 8")
@@ -344,8 +414,8 @@ def compute_steady_state_conditions(
 
     notes.append(
         "Steady-state window: "
-        f"{_STEADY_STATE_START_MS:.0f}-{_STEADY_STATE_END_MS:.0f} ms after burst "
-        f"(indices {start_idx}-{end_idx})."
+        f"{_STEADY_STATE_START_MS:.0f}-{_STEADY_STATE_END_MS:.0f} ms after {anchor_label} "
+        f"(indices {start_idx}-{start_idx + len(window) - 1}, anchor {anchor_idx})."
     )
     notes.append(f"T0j assumed constant at {_ASSUMED_T0J_K:.0f} K.")
     notes.append(f"pinf computed from p0 using isentropic relation at M={tunnel_mach:.3g}.")
@@ -816,37 +886,15 @@ def write_campaign_summary_figures(
             except ValueError:
                 header_row_index = 23
 
-            data = read_lvm_data(fst.primary_lvm, header_row_index=header_row_index)
-            anchor_label = "burst"
-            try:
-                detection = pick_trigger_and_burst(
-                    data,
-                    trigger_channel="Voltage",
-                    burst_channel="PLEN-PT",
-                )
-                anchor_idx = detection.burst_idx
-            except Exception:
-                detection = pick_trigger_and_burst(
-                    data,
-                    trigger_channel="Voltage",
-                    burst_channel=None,
-                )
-                anchor_idx = detection.trigger_idx
-                anchor_label = "trigger"
-
-            if anchor_idx is None:
-                anchor_idx = detection.trigger_idx
-                anchor_label = "trigger"
-            fs_hz = infer_sample_rate_hz(data)
-
-            start_idx = anchor_idx + int(round(_SUMMARY_PLOT_START_MS * fs_hz / 1000.0))
-            end_idx = anchor_idx + int(round(_SUMMARY_PLOT_END_MS * fs_hz / 1000.0))
-            start_idx = max(0, start_idx)
-            end_idx = min(len(data) - 1, end_idx)
-            if end_idx <= start_idx:
-                raise ValueError("Plot window was empty after anchor detection.")
-
-            window = data.iloc[start_idx : end_idx + 1]
+            local_notes: list[str] = []
+            window, start_idx, anchor_idx, fs_hz, anchor_label = _read_lvm_event_window(
+                fst.primary_lvm,
+                header_row_index=header_row_index,
+                start_ms=_SUMMARY_PLOT_START_MS,
+                end_ms=_SUMMARY_PLOT_END_MS,
+                require_burst_confidence=False,
+                fallback_notes=local_notes,
+            )
             _write_fst_summary_plot(
                 window,
                 anchor_idx=anchor_idx,
@@ -857,127 +905,9 @@ def write_campaign_summary_figures(
                 fst_id=fst.normalized_name,
                 jet_used=jet_used,
             )
-        except Exception as exc:
-            if progress_callback is not None:
-                progress_callback(f"Skipping plot for {fst.normalized_name}: {exc}")
-
-    return figure_dir
-
-
-def _write_fst_summary_plot(
-    df_window,
-    anchor_idx: int,
-    anchor_label: str,
-    start_idx: int,
-    fs_hz: float,
-    output_path: Path,
-    fst_id: str,
-) -> None:
-    if "Voltage" not in df_window.columns:
-        raise ValueError("Trigger channel 'Voltage' not found in LVM data.")
-    if "PLEN-PT" not in df_window.columns:
-        raise ValueError("Plenum channel 'PLEN-PT' not found in LVM data.")
-
-    indices = np.arange(start_idx, start_idx + len(df_window))
-    ms = (indices - anchor_idx) * 1000.0 / fs_hz
-
-    fig, ax1 = plt.subplots(figsize=(8, 4.5))
-    ax1.plot(ms, df_window["PLEN-PT"], color="tab:blue", label="PLEN-PT")
-    ax1.set_xlabel(f"Time from {anchor_label} (ms)")
-    ax1.set_ylabel("PLEN-PT", color="tab:blue")
-    ax1.tick_params(axis="y", labelcolor="tab:blue")
-    ax1.grid(True, alpha=0.3)
-
-    ax2 = ax1.twinx()
-    ax2.plot(ms, df_window["Voltage"], color="tab:red", label="Voltage")
-    ax2.set_ylabel("Voltage", color="tab:red")
-    ax2.tick_params(axis="y", labelcolor="tab:red")
-
-    ax1.axvline(0.0, color="k", linestyle="--", linewidth=1)
-    ax1.set_title(f"{fst_id}: trigger + plenum around {anchor_label}")
-
-    lines = ax1.get_lines() + ax2.get_lines()
-    ax1.legend(lines, [line.get_label() for line in lines], loc="upper left")
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
-    plt.close(fig)
-
-
-def write_campaign_summary_figures(
-    campaign_root: Path,
-    summary_output_path: Path,
-    progress_callback: Callable[[str], None] | None = None,
-    reprocess_all: bool = False,
-) -> Path:
-    figure_dir = Path(summary_output_path).parent / "campaign_summary_figs"
-    figure_dir.mkdir(parents=True, exist_ok=True)
-
-    discovery = discover_campaign(campaign_root)
-    for fst in discovery.fsts:
-        if fst.primary_lvm is None:
-            if progress_callback is not None:
-                progress_callback(f"Skipping plot for {fst.normalized_name}: missing LVM.")
-            continue
-
-        output_path = figure_dir / f"{fst.normalized_name}_overview.png"
-        if not reprocess_all and output_path.exists() and fst.primary_lvm is not None:
-            if output_path.stat().st_mtime >= fst.primary_lvm.stat().st_mtime:
+            for note in local_notes:
                 if progress_callback is not None:
-                    progress_callback(f"Reusing plot for {fst.normalized_name}...")
-                continue
-
-        try:
-            try:
-                header_row_index = detect_header_row_from_file(
-                    fst.primary_lvm,
-                    trigger_channel="Voltage",
-                    burst_channel="PLEN-PT",
-                )
-            except ValueError:
-                header_row_index = 23
-
-            data = read_lvm_data(fst.primary_lvm, header_row_index=header_row_index)
-            anchor_label = "burst"
-            try:
-                detection = pick_trigger_and_burst(
-                    data,
-                    trigger_channel="Voltage",
-                    burst_channel="PLEN-PT",
-                )
-                anchor_idx = detection.burst_idx
-            except Exception:
-                detection = pick_trigger_and_burst(
-                    data,
-                    trigger_channel="Voltage",
-                    burst_channel=None,
-                )
-                anchor_idx = detection.trigger_idx
-                anchor_label = "trigger"
-
-            if anchor_idx is None:
-                anchor_idx = detection.trigger_idx
-                anchor_label = "trigger"
-            fs_hz = infer_sample_rate_hz(data)
-
-            start_idx = anchor_idx + int(round(_SUMMARY_PLOT_START_MS * fs_hz / 1000.0))
-            end_idx = anchor_idx + int(round(_SUMMARY_PLOT_END_MS * fs_hz / 1000.0))
-            start_idx = max(0, start_idx)
-            end_idx = min(len(data) - 1, end_idx)
-            if end_idx <= start_idx:
-                raise ValueError("Plot window was empty after anchor detection.")
-
-            window = data.iloc[start_idx : end_idx + 1]
-            _write_fst_summary_plot(
-                window,
-                anchor_idx=anchor_idx,
-                anchor_label=anchor_label,
-                start_idx=start_idx,
-                fs_hz=fs_hz,
-                output_path=output_path,
-                fst_id=fst.normalized_name,
-            )
+                    progress_callback(f"{fst.normalized_name}: {note}")
         except Exception as exc:
             if progress_callback is not None:
                 progress_callback(f"Skipping plot for {fst.normalized_name}: {exc}")
@@ -1012,10 +942,4 @@ def write_campaign_summary(
         figure_dir=figure_dir,
     )
     output_path.write_text(markdown, encoding="utf-8")
-    write_campaign_summary_figures(
-        campaign_root,
-        output_path,
-        progress_callback=progress_callback,
-        reprocess_all=reprocess_all,
-    )
     return output_path
