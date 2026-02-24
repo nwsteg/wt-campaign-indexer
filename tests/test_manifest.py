@@ -1,3 +1,4 @@
+import inspect
 import json
 import shutil
 from pathlib import Path
@@ -11,6 +12,7 @@ from wtt_campaign_indexer.manifest import (
     infer_rate_from_hcc,
     write_campaign_manifests,
     write_campaign_summary,
+    write_campaign_summary_figures,
     write_fst_manifest,
 )
 
@@ -18,6 +20,35 @@ from wtt_campaign_indexer.manifest import (
 def _touch(path: Path, content: str = "") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def test_write_campaign_summary_signature_matches_figures_contract() -> None:
+    summary_params = inspect.signature(write_campaign_summary).parameters
+    figures_params = inspect.signature(write_campaign_summary_figures).parameters
+
+    assert "campaign_root" in summary_params
+    assert "output_path" in summary_params
+    assert "progress_callback" in summary_params
+    assert "reprocess_all" in summary_params
+    assert "jet_used" in summary_params
+
+    assert "campaign_root" in figures_params
+    assert "summary_output_path" in figures_params
+    assert "progress_callback" in figures_params
+    assert "reprocess_all" in figures_params
+    assert "jet_used" in figures_params
+
+    assert summary_params["campaign_root"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert summary_params["output_path"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert summary_params["progress_callback"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert summary_params["reprocess_all"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert summary_params["jet_used"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+
+    assert figures_params["campaign_root"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert figures_params["summary_output_path"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert figures_params["progress_callback"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert figures_params["reprocess_all"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    assert figures_params["jet_used"].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
 
 
 def test_manifest_required_keys_always_exist(tmp_path: Path):
