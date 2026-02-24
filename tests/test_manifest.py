@@ -252,6 +252,75 @@ def test_write_campaign_manifests_reuses_existing_when_unchanged(tmp_path: Path,
     write_campaign_manifests(tmp_path, reprocess_all=False)
 
 
+def test_cache_reuses_unchanged_fsts_across_runs(tmp_path: Path, monkeypatch):
+    fst_dir = tmp_path / "FST1391"
+    fst_dir.mkdir()
+    _touch(fst_dir / "FST_1391.lvm")
+
+    write_campaign_manifests(tmp_path)
+
+    monkeypatch.setattr(
+        "wtt_campaign_indexer.manifest.build_fst_manifest",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("should not rebuild")),
+    )
+    write_campaign_manifests(tmp_path, reprocess_all=False)
+
+
+def test_cache_processes_only_new_fst(tmp_path: Path, monkeypatch):
+    fst_a = tmp_path / "FST1391"
+    fst_a.mkdir()
+    _touch(fst_a / "FST_1391.lvm")
+    write_campaign_manifests(tmp_path)
+
+    fst_b = tmp_path / "FST1392"
+    fst_b.mkdir()
+    _touch(fst_b / "FST_1392.lvm")
+
+    rebuilt: list[str] = []
+    original = __import__(
+        "wtt_campaign_indexer.manifest", fromlist=["build_fst_manifest"]
+    ).build_fst_manifest
+
+    def _tracking_build(fst, **kwargs):
+        rebuilt.append(fst.normalized_name)
+        return original(fst, **kwargs)
+
+    monkeypatch.setattr("wtt_campaign_indexer.manifest.build_fst_manifest", _tracking_build)
+    write_campaign_manifests(tmp_path)
+
+    assert rebuilt == ["FST_1392"]
+
+
+def test_cache_invalidates_only_entries_with_setting_change(tmp_path: Path, monkeypatch):
+    fst_a = tmp_path / "FST1391"
+    fst_b = tmp_path / "FST1392"
+    fst_a.mkdir()
+    fst_b.mkdir()
+    _touch(fst_a / "FST_1391.lvm")
+    _touch(fst_b / "FST_1392.lvm")
+
+    write_campaign_manifests(tmp_path, tunnel_mach=7.2, jet_used=False, jet_mach=None)
+
+    cache_path = tmp_path / ".wtt_campaign_cache.json"
+    cache_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    cache_payload["fsts"]["FST_1392"]["settings"]["tunnel_mach"] = 8.0
+    cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
+
+    rebuilt: list[str] = []
+    original = __import__(
+        "wtt_campaign_indexer.manifest", fromlist=["build_fst_manifest"]
+    ).build_fst_manifest
+
+    def _tracking_build(fst, **kwargs):
+        rebuilt.append(fst.normalized_name)
+        return original(fst, **kwargs)
+
+    monkeypatch.setattr("wtt_campaign_indexer.manifest.build_fst_manifest", _tracking_build)
+    write_campaign_manifests(tmp_path, tunnel_mach=7.2, jet_used=False, jet_mach=None)
+
+    assert rebuilt == ["FST_1392"]
+
+
 def test_write_campaign_manifests_reprocess_all_forces_rebuild(tmp_path: Path, monkeypatch):
     fst_dir = tmp_path / "FST1391"
     fst_dir.mkdir()
@@ -338,7 +407,9 @@ def test_summary_figure_uses_expected_window_bounds(tmp_path: Path, monkeypatch)
 
     captured = {}
 
-    def _capture(df_window, anchor_idx, anchor_label, start_idx, fs_hz, output_path, fst_id, jet_used):
+    def _capture(
+        df_window, anchor_idx, anchor_label, start_idx, fs_hz, output_path, fst_id, jet_used
+    ):
         captured["len"] = len(df_window)
         captured["start_ms"] = (start_idx - anchor_idx) * 1000.0 / fs_hz
         captured["end_ms"] = (start_idx + len(df_window) - 1 - anchor_idx) * 1000.0 / fs_hz

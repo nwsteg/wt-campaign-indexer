@@ -5,6 +5,7 @@ from pathlib import Path
 
 from wtt_campaign_indexer.discovery import discover_campaign
 from wtt_campaign_indexer.manifest import (
+    predict_campaign_reuse_counts,
     write_campaign_manifests,
     write_campaign_summary,
 )
@@ -87,6 +88,9 @@ def _resolve_reprocess_all(
     *,
     reprocess_all: bool,
     reuse_existing: bool,
+    tunnel_mach: float,
+    jet_used: bool,
+    jet_mach: float | None,
 ) -> bool:
     if reprocess_all:
         return True
@@ -108,9 +112,16 @@ def _resolve_reprocess_all(
         return False
 
     summary_text = "yes" if summary_exists else "no"
+    reuse_count, rebuild_count = predict_campaign_reuse_counts(
+        campaign_root,
+        tunnel_mach=tunnel_mach,
+        jet_used=jet_used,
+        jet_mach=jet_mach,
+    )
     prompt = (
         "Detected existing outputs "
-        f"(summary={summary_text}, manifests={manifest_count}, plots={plot_count}). "
+        f"(summary={summary_text}, manifests={manifest_count}, plots={plot_count}; "
+        f"predicted: {reuse_count} reuse, {rebuild_count} rebuild). "
         "Reprocess all FSTs?"
     )
     return _prompt_bool(prompt, default=False)
@@ -177,14 +188,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     summary_output = _resolve_summary_output(args.campaign_root, args.summary_output)
+    tunnel_mach = _resolve_tunnel_mach(args.tunnel_mach)
+    jet_used, jet_mach = _resolve_jet_options(jet_used=args.jet_used, jet_mach=args.jet_mach)
     reprocess_all = _resolve_reprocess_all(
         args.campaign_root,
         summary_output,
         reprocess_all=args.reprocess_all,
         reuse_existing=args.reuse_existing,
+        tunnel_mach=tunnel_mach,
+        jet_used=jet_used,
+        jet_mach=jet_mach,
     )
-    tunnel_mach = _resolve_tunnel_mach(args.tunnel_mach)
-    jet_used, jet_mach = _resolve_jet_options(jet_used=args.jet_used, jet_mach=args.jet_mach)
 
     print("Starting campaign manifest generation...", flush=True)
     manifest_paths = write_campaign_manifests(
