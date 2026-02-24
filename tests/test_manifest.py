@@ -142,6 +142,10 @@ def test_write_campaign_summary_writes_file(tmp_path: Path):
     assert (figure_dir / "FST_1391_overview.png").exists()
     assert "![FST_1391 trace](campaign_summary_figs/FST_1391_overview.png)" in markdown
 
+    figure_dir = tmp_path / "campaign_summary_figs"
+    assert figure_dir.exists()
+    assert (figure_dir / "FST_1391_overview.png").exists()
+
 
 def test_infer_rate_supports_record_rate_pattern(tmp_path: Path):
     cihx = tmp_path / "meta.cihx"
