@@ -84,6 +84,9 @@ def test_resolve_reprocess_all_obeys_explicit_flags(tmp_path: Path) -> None:
             summary_path,
             reprocess_all=True,
             reuse_existing=False,
+            tunnel_mach=7.2,
+            jet_used=False,
+            jet_mach=None,
         )
         is True
     )
@@ -93,6 +96,9 @@ def test_resolve_reprocess_all_obeys_explicit_flags(tmp_path: Path) -> None:
             summary_path,
             reprocess_all=False,
             reuse_existing=True,
+            tunnel_mach=7.2,
+            jet_used=False,
+            jet_mach=None,
         )
         is False
     )
@@ -121,6 +127,47 @@ def test_resolve_reprocess_all_prompts_when_outputs_exist(
             summary_path,
             reprocess_all=False,
             reuse_existing=False,
+            tunnel_mach=7.2,
+            jet_used=False,
+            jet_mach=None,
         )
         is True
     )
+
+
+def test_resolve_reprocess_all_prompt_includes_predicted_counts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fst_dir = tmp_path / "FST1391"
+    fst_dir.mkdir()
+    (fst_dir / "FST_1391.lvm").write_text("", encoding="utf-8")
+    (fst_dir / "FST_1391_manifest.json").write_text("{}", encoding="utf-8")
+
+    summary_path = tmp_path / "campaign_summary.md"
+    summary_path.write_text("existing", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "wtt_campaign_indexer.manifest_cli.predict_campaign_reuse_counts",
+        lambda *_args, **_kwargs: (8, 2),
+    )
+
+    captured = {}
+
+    def _capture_prompt(prompt: str, default: bool) -> bool:
+        captured["prompt"] = prompt
+        return False
+
+    monkeypatch.setattr("wtt_campaign_indexer.manifest_cli._prompt_bool", _capture_prompt)
+
+    _resolve_reprocess_all(
+        tmp_path,
+        summary_path,
+        reprocess_all=False,
+        reuse_existing=False,
+        tunnel_mach=7.2,
+        jet_used=False,
+        jet_mach=None,
+    )
+
+    assert "predicted: 8 reuse, 2 rebuild" in captured["prompt"]

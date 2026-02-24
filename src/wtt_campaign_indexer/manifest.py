@@ -5,6 +5,7 @@ import json
 import math
 import re
 import struct
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
@@ -57,6 +58,110 @@ _ASSUMED_T0J_K = 300.0
 _DEFAULT_TUNNEL_MACH = 7.2
 _SUMMARY_PLOT_START_MS = -20.0
 _SUMMARY_PLOT_END_MS = 120.0
+_CACHE_FILE_NAME = ".wtt_campaign_cache.json"
+
+
+def _cache_path(campaign_root: Path) -> Path:
+    return Path(campaign_root) / _CACHE_FILE_NAME
+
+
+def _load_campaign_cache(campaign_root: Path) -> dict[str, object]:
+    path = _cache_path(campaign_root)
+    if not path.exists():
+        return {"fsts": {}}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"fsts": {}}
+    fsts = payload.get("fsts")
+    if not isinstance(fsts, dict):
+        return {"fsts": {}}
+    return payload
+
+
+def _save_campaign_cache(campaign_root: Path, cache_payload: dict[str, object]) -> None:
+    _cache_path(campaign_root).write_text(
+        json.dumps(cache_payload, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _fst_fingerprint(fst: FSTDiscovery) -> OrderedDict[str, object]:
+    lvm_fingerprint: OrderedDict[str, object] | None = None
+    if fst.primary_lvm is not None and fst.primary_lvm.exists():
+        stat = fst.primary_lvm.stat()
+        lvm_fingerprint = OrderedDict(
+            (("path", str(fst.primary_lvm)), ("mtime", stat.st_mtime), ("size", stat.st_size))
+        )
+
+    metadata_mtimes: OrderedDict[str, float] = OrderedDict()
+    for diagnostic in fst.diagnostics:
+        for run in diagnostic.runs:
+            for metadata_path in (*run.cihx_files, *run.hcc_files):
+                if metadata_path.exists():
+                    metadata_mtimes[str(metadata_path)] = metadata_path.stat().st_mtime
+
+    return OrderedDict((("lvm", lvm_fingerprint), ("metadata_mtimes", metadata_mtimes)))
+
+
+def _fst_settings(
+    tunnel_mach: float, jet_used: bool, jet_mach: float | None
+) -> OrderedDict[str, object]:
+    return OrderedDict(
+        (("tunnel_mach", tunnel_mach), ("jet_used", jet_used), ("jet_mach", jet_mach))
+    )
+
+
+def _read_cache_record(
+    cache_payload: dict[str, object], fst: FSTDiscovery
+) -> dict[str, object] | None:
+    fsts = cache_payload.get("fsts")
+    if not isinstance(fsts, dict):
+        return None
+    record = fsts.get(fst.normalized_name)
+    return record if isinstance(record, dict) else None
+
+
+def _can_reuse_from_cache(
+    fst: FSTDiscovery,
+    cache_payload: dict[str, object],
+    *,
+    tunnel_mach: float,
+    jet_used: bool,
+    jet_mach: float | None,
+) -> bool:
+    record = _read_cache_record(cache_payload, fst)
+    if record is None:
+        return False
+    return record.get("fingerprint") == _fst_fingerprint(fst) and record.get(
+        "settings"
+    ) == _fst_settings(
+        tunnel_mach,
+        jet_used,
+        jet_mach,
+    )
+
+
+def predict_campaign_reuse_counts(
+    campaign_root: Path,
+    *,
+    tunnel_mach: float,
+    jet_used: bool,
+    jet_mach: float | None,
+) -> tuple[int, int]:
+    discovery = discover_campaign(campaign_root)
+    cache_payload = _load_campaign_cache(campaign_root)
+    reuse_count = sum(
+        1
+        for fst in discovery.fsts
+        if _can_reuse_from_cache(
+            fst,
+            cache_payload,
+            tunnel_mach=tunnel_mach,
+            jet_used=jet_used,
+            jet_mach=jet_mach,
+        )
+    )
+    return reuse_count, len(discovery.fsts) - reuse_count
 
 
 def _read_lvm_event_window(
@@ -94,7 +199,9 @@ def _read_lvm_event_window(
             end_data_row=bounded_end,
         )
         if window_df.empty:
-            fallback_notes.append("Coarse event window read returned empty; using full read fallback.")
+            fallback_notes.append(
+                "Coarse event window read returned empty; using full read fallback."
+            )
         else:
             rel_start = max(0, start_idx - bounded_start)
             rel_end = min(len(window_df) - 1, end_idx - bounded_start)
@@ -107,7 +214,9 @@ def _read_lvm_event_window(
                     "burst" if coarse.burst_idx is not None else "trigger",
                 )
     if require_burst_confidence:
-        fallback_notes.append(f"Coarse detection confidence insufficient ({coarse.reason}); using full read fallback.")
+        fallback_notes.append(
+            f"Coarse detection confidence insufficient ({coarse.reason}); using full read fallback."
+        )
 
     data = read_lvm_data(lvm_path, header_row_index=header_row_index)
     detection = pick_trigger_and_burst(data, trigger_channel="Voltage", burst_channel="PLEN-PT")
@@ -586,52 +695,68 @@ def write_fst_manifest(
     return manifest_path
 
 
-def _latest_fst_input_mtime(fst: FSTDiscovery) -> float:
-    mtimes = [fst.path.stat().st_mtime]
-    if fst.primary_lvm is not None and fst.primary_lvm.exists():
-        mtimes.append(fst.primary_lvm.stat().st_mtime)
-
-    for diagnostic in fst.diagnostics:
-        if diagnostic.path.exists():
-            mtimes.append(diagnostic.path.stat().st_mtime)
-        for run in diagnostic.runs:
-            if run.path.exists():
-                mtimes.append(run.path.stat().st_mtime)
-            for cihx_path in run.cihx_files:
-                if cihx_path.exists():
-                    mtimes.append(cihx_path.stat().st_mtime)
-            for hcc_path in run.hcc_files:
-                if hcc_path.exists():
-                    mtimes.append(hcc_path.stat().st_mtime)
-
-    return max(mtimes)
-
-
-def _load_reusable_manifest(
+def _update_cache_record(
+    cache_payload: dict[str, object],
     fst: FSTDiscovery,
+    *,
+    tunnel_mach: float,
+    jet_used: bool,
+    jet_mach: float | None,
+    manifest_path: Path,
+    figure_path: Path | None = None,
+    summary_generated_at: float | None = None,
+) -> None:
+    fsts = cache_payload.setdefault("fsts", {})
+    if not isinstance(fsts, dict):
+        return
+
+    existing_record = fsts.get(fst.normalized_name)
+    outputs: dict[str, object] = {}
+    if isinstance(existing_record, dict):
+        existing_outputs = existing_record.get("outputs")
+        if isinstance(existing_outputs, dict):
+            outputs.update(existing_outputs)
+
+    outputs["manifest_path"] = str(manifest_path)
+    if figure_path is not None:
+        outputs["figure_path"] = str(figure_path)
+    if summary_generated_at is not None:
+        outputs["summary_generated_at"] = summary_generated_at
+
+    fsts[fst.normalized_name] = OrderedDict(
+        (
+            ("fingerprint", _fst_fingerprint(fst)),
+            ("settings", _fst_settings(tunnel_mach, jet_used, jet_mach)),
+            ("outputs", outputs),
+        )
+    )
+
+
+def _load_reusable_manifest_from_cache(
+    fst: FSTDiscovery,
+    cache_payload: dict[str, object],
+    *,
     tunnel_mach: float,
     jet_used: bool,
     jet_mach: float | None,
 ) -> OrderedDict[str, object] | None:
-    manifest_path = fst.path / f"{fst.normalized_name}_manifest.json"
-    if not manifest_path.exists():
+    if not _can_reuse_from_cache(
+        fst,
+        cache_payload,
+        tunnel_mach=tunnel_mach,
+        jet_used=jet_used,
+        jet_mach=jet_mach,
+    ):
         return None
 
-    if manifest_path.stat().st_mtime < _latest_fst_input_mtime(fst):
+    manifest_path = fst.path / f"{fst.normalized_name}_manifest.json"
+    if not manifest_path.exists():
         return None
 
     try:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
-
-    if payload.get("tunnel_mach") != tunnel_mach:
-        return None
-    if payload.get("jet_used") != jet_used:
-        return None
-    if payload.get("jet_mach") != jet_mach:
-        return None
-
     return payload
 
 
@@ -646,14 +771,18 @@ def write_campaign_manifests(
     if progress_callback is not None:
         progress_callback("Discovering campaign folders...")
     discovery = discover_campaign(campaign_root)
+    cache_payload = _load_campaign_cache(campaign_root)
+
     manifest_paths: list[Path] = []
+    cache_dirty = False
     for fst in discovery.fsts:
         manifest_path = fst.path / f"{fst.normalized_name}_manifest.json"
         reusable_manifest = (
             None
             if reprocess_all
-            else _load_reusable_manifest(
+            else _load_reusable_manifest_from_cache(
                 fst,
+                cache_payload,
                 tunnel_mach=tunnel_mach,
                 jet_used=jet_used,
                 jet_mach=jet_mach,
@@ -667,14 +796,25 @@ def write_campaign_manifests(
 
         if progress_callback is not None:
             progress_callback(f"Processing {fst.normalized_name}...")
-        manifest_paths.append(
-            write_fst_manifest(
-                fst,
-                tunnel_mach=tunnel_mach,
-                jet_used=jet_used,
-                jet_mach=jet_mach,
-            )
+        manifest_path = write_fst_manifest(
+            fst,
+            tunnel_mach=tunnel_mach,
+            jet_used=jet_used,
+            jet_mach=jet_mach,
         )
+        manifest_paths.append(manifest_path)
+        _update_cache_record(
+            cache_payload,
+            fst,
+            tunnel_mach=tunnel_mach,
+            jet_used=jet_used,
+            jet_mach=jet_mach,
+            manifest_path=manifest_path,
+        )
+        cache_dirty = True
+
+    if cache_dirty:
+        _save_campaign_cache(campaign_root, cache_payload)
     return tuple(manifest_paths)
 
 
@@ -710,6 +850,8 @@ def build_campaign_summary_markdown(
     progress_callback: Callable[[str], None] | None = None,
     reprocess_all: bool = False,
     figure_dir: Path | None = None,
+    cache_payload: dict[str, object] | None = None,
+    rebuilt_fsts: set[str] | None = None,
 ) -> str:
     if progress_callback is not None:
         progress_callback("Discovering campaign folders...")
@@ -728,12 +870,16 @@ def build_campaign_summary_markdown(
     lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
 
     manifests_by_fst: dict[str, OrderedDict[str, object]] = {}
+    effective_cache = (
+        cache_payload if cache_payload is not None else _load_campaign_cache(campaign_root)
+    )
     for fst in discovery.fsts:
         manifest = (
             None
             if reprocess_all
-            else _load_reusable_manifest(
+            else _load_reusable_manifest_from_cache(
                 fst,
+                effective_cache,
                 tunnel_mach=tunnel_mach,
                 jet_used=jet_used,
                 jet_mach=jet_mach,
@@ -751,6 +897,8 @@ def build_campaign_summary_markdown(
                 jet_used=jet_used,
                 jet_mach=jet_mach,
             )
+            if rebuilt_fsts is not None:
+                rebuilt_fsts.add(fst.normalized_name)
         manifests_by_fst[fst.normalized_name] = manifest
         summary = manifest["condition_summary"]
 
@@ -925,6 +1073,8 @@ def write_campaign_summary(
     reprocess_all: bool = False,
 ) -> Path:
     output_path = Path(output_path)
+    cache_payload = _load_campaign_cache(campaign_root)
+
     figure_dir = write_campaign_summary_figures(
         campaign_root,
         output_path,
@@ -932,6 +1082,8 @@ def write_campaign_summary(
         reprocess_all=reprocess_all,
         jet_used=jet_used,
     )
+
+    rebuilt_fsts: set[str] = set()
     markdown = build_campaign_summary_markdown(
         campaign_root,
         tunnel_mach=tunnel_mach,
@@ -940,6 +1092,28 @@ def write_campaign_summary(
         progress_callback=progress_callback,
         reprocess_all=reprocess_all,
         figure_dir=figure_dir,
+        cache_payload=cache_payload,
+        rebuilt_fsts=rebuilt_fsts,
     )
     output_path.write_text(markdown, encoding="utf-8")
+
+    if rebuilt_fsts:
+        discovery = discover_campaign(campaign_root)
+        generated_at = time.time()
+        for fst in discovery.fsts:
+            if fst.normalized_name not in rebuilt_fsts:
+                continue
+            figure_path = figure_dir / f"{fst.normalized_name}_overview.png"
+            _update_cache_record(
+                cache_payload,
+                fst,
+                tunnel_mach=tunnel_mach,
+                jet_used=jet_used,
+                jet_mach=jet_mach,
+                manifest_path=fst.path / f"{fst.normalized_name}_manifest.json",
+                figure_path=figure_path,
+                summary_generated_at=generated_at,
+            )
+        _save_campaign_cache(campaign_root, cache_payload)
+
     return output_path
